@@ -1,1271 +1,1312 @@
-/*
-  GabayAI - Core Application Logic
-  Integrates PDF extraction, local Hugging Face Transformers.js models,
-  and state management for offline study modes.
-*/
+import Dexie from 'https://cdn.jsdelivr.net/npm/dexie@4.0.8/+esm';
+import * as pdfjsLib from 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.3.136/pdf.min.mjs';
+import { createWorker } from 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/+esm';
+import { initAIEngine, generateStudyMaterial } from './ai-engine.js';
 
-import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.3.3';
-import * as pdfjsLib from 'https://unpkg.com/pdfjs-dist@4.3.136/build/pdf.min.mjs';
+// Setup pdf.js worker
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.3.136/pdf.worker.min.mjs';
 
-// Configure PDF.js Worker path to load from CDN
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@4.3.136/build/pdf.worker.min.mjs';
-
-// Configure Transformers.js to allow remote downloads and locate WASM resources
-env.allowLocalModels = false;
-env.backends.onnx.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.3.3/dist/';
-
-// --- State Architecture ---
-const state = {
-  isOnline: navigator.onLine,
-  demoMode: true, // Default to demo mode for quick instant testing
-  modelDownloaded: false,
-  modelDownloading: false,
-  modelProgress: 0,
-  activeTab: 'flashcards', // 'flashcards' | 'quiz'
-
-  // Wizard state
-  wizardStep: 1, // 1 | 2
-  selectedSource: null, // 'pdf' | 'notes' | 'ppt' | 'youtube' | 'photo' | 'web'
-  showMoreActive: false,
-
-  // Study material
-  extractedText: '',
-  selectedLanguage: 'taglish',
-  studyDeck: null, // Holds { flashcards: [...], quiz: [...] }
-
-  // Flashcard View State
-  currentCardIndex: 0,
-  cardFlipped: false,
-
-  // Quiz View State
-  currentQuizIndex: 0,
-  quizSelectedOption: null, // Selected index
-  quizAnswers: [], // User answers
-  quizScore: 0,
-  quizCompleted: false
-};
-
-// Local LLM Pipeline Variable
-let generator = null;
-const fileProgresses = {};
-
-// --- Service Worker Registration ---
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js')
-      .then(reg => console.log('[GabayAI] Service Worker registered:', reg.scope))
-      .catch(err => console.error('[GabayAI] Service Worker registration failed:', err));
-  });
-}
-
-// --- DOM References ---
-const offlineBanner = document.getElementById('offline-banner');
-const offlineBannerText = document.getElementById('offline-banner-text');
-const engineStatusBadge = document.getElementById('engine-status-badge');
-
-// Wizard Elements
-const wizardContainer = document.getElementById('wizard-container');
-const wizardProgressFill = document.getElementById('wizard-progress-fill');
-const wizardBackBtn = document.getElementById('wizard-back-btn');
-const wizardStep1 = document.getElementById('wizard-step-1');
-const wizardStep2 = document.getElementById('wizard-step-2');
-const wizardStep2Title = document.getElementById('wizard-step-2-title');
-const showMoreToggleBtn = document.getElementById('show-more-toggle-btn');
-const showMoreIcon = document.getElementById('show-more-icon');
-const showMorePanel = document.getElementById('show-more-panel');
-const btnDemoNoMaterial = document.getElementById('btn-demo-no-material');
-
-// Step 2 Input Group Elements
-const inputGroupFile = document.getElementById('input-group-file');
-const inputGroupNotes = document.getElementById('input-group-notes');
-const inputGroupYoutube = document.getElementById('input-group-youtube');
-const inputGroupPhoto = document.getElementById('input-group-photo');
-const inputGroupWeb = document.getElementById('input-group-web');
-
-// Specific Inputs
-const dropzone = document.getElementById('dropzone');
-const fileInput = document.getElementById('file-input');
-const fileInfo = document.getElementById('file-info');
-const fileNameText = document.getElementById('file-name');
-const fileSizeText = document.getElementById('file-size');
-const removeFileBtn = document.getElementById('remove-file-btn');
-const textInput = document.getElementById('text-input');
-const charCounter = document.getElementById('char-counter');
-const youtubeUrlInput = document.getElementById('youtube-url-input');
-const photoDropzone = document.getElementById('photo-dropzone');
-const photoFileInput = document.getElementById('photo-file-input');
-const photoInfo = document.getElementById('photo-info');
-const photoFileName = document.getElementById('photo-file-name');
-const photoFileSize = document.getElementById('photo-file-size');
-const removePhotoBtn = document.getElementById('remove-photo-btn');
-const webUrlInput = document.getElementById('web-url-input');
-
-const languageSelect = document.getElementById('language-select');
-const generateBtn = document.getElementById('generate-btn');
-const noDeckPlaceholder = document.getElementById('no-deck-placeholder');
-const generatingLoader = document.getElementById('generating-loader');
-const studyDeckSection = document.getElementById('study-deck-section');
-
-// Tabs
-const tabFlashcardsBtn = document.getElementById('tab-flashcards-btn');
-const tabQuizBtn = document.getElementById('tab-quiz-btn');
-const tabFlashcardsView = document.getElementById('tab-flashcards-view');
-const tabQuizView = document.getElementById('tab-quiz-view');
-
-// Flashcard DOM Elements
-const flashcardContainer = document.getElementById('flashcard-container');
-const flashcardInner = document.getElementById('flashcard-inner');
-const cardConceptText = document.getElementById('card-concept-text');
-const cardDefinitionText = document.getElementById('card-definition-text');
-const prevCardBtn = document.getElementById('prev-card-btn');
-const nextCardBtn = document.getElementById('next-card-btn');
-const flashcardProgressText = document.getElementById('flashcard-progress-text');
-const flashcardProgressBar = document.getElementById('flashcard-progress-bar');
-
-// Quiz DOM Elements
-const quizQuestionCard = document.getElementById('quiz-question-card');
-const quizResultsCard = document.getElementById('quiz-results-card');
-const quizQuestionText = document.getElementById('quiz-question-text');
-const quizOptionsContainer = document.getElementById('quiz-options-container');
-const quizFeedbackBox = document.getElementById('quiz-feedback-box');
-const quizFeedbackTitle = document.getElementById('quiz-feedback-title');
-const quizExplanationText = document.getElementById('quiz-explanation-text');
-const quizSubmitBtn = document.getElementById('quiz-submit-btn');
-const quizProgressText = document.getElementById('quiz-progress-text');
-const quizFinalScore = document.getElementById('quiz-final-score');
-const quizPercentageText = document.getElementById('quiz-percentage-text');
-const quizRestartBtn = document.getElementById('quiz-restart-btn');
-const darkModeBtn = document.getElementById('dark-mode-btn');
-const sunIcon = document.getElementById('sun-icon');
-const moonIcon = document.getElementById('moon-icon');
-
-// --- Initialization ---
-document.addEventListener('DOMContentLoaded', () => {
-  updateOnlineStatus();
-  initTheme();
-  setupEventListeners();
-  renderState();
+// Initialize Dexie.js database
+const db = new Dexie('MulatAIDB');
+db.version(1).stores({
+  materials: '++id, filename, timestamp',
+  reviewers: '++id, materialId, timestamp',
+  flashcards: '++id, materialId, timestamp',
+  quiz_attempts: '++id, materialId, timestamp'
 });
 
-// --- Theme (Dark Mode) Setup ---
-function initTheme() {
-  if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-    document.documentElement.classList.add('dark');
-    sunIcon.classList.remove('hidden');
-    moonIcon.classList.add('hidden');
-  } else {
-    document.documentElement.classList.remove('dark');
-    sunIcon.classList.add('hidden');
-    moonIcon.classList.remove('hidden');
-  }
-}
-
-function toggleTheme() {
-  if (document.documentElement.classList.contains('dark')) {
-    document.documentElement.classList.remove('dark');
-    localStorage.theme = 'light';
-    sunIcon.classList.add('hidden');
-    moonIcon.classList.remove('hidden');
-  } else {
-    document.documentElement.classList.add('dark');
-    localStorage.theme = 'dark';
-    sunIcon.classList.remove('hidden');
-    moonIcon.classList.add('hidden');
-  }
-}
-
-// --- Status & State Render Loop ---
-function updateOnlineStatus() {
-  state.isOnline = navigator.onLine;
-  if (state.isOnline) {
-    offlineBanner.className = 'w-full bg-emerald-600 text-white text-xs font-semibold py-1.5 px-4 text-center flex items-center justify-center gap-2 transition-all duration-300 transform translate-y-0';
-    offlineBannerText.textContent = 'Konektado: Online Mode';
-    offlineBanner.classList.remove('glow-active-red');
-    offlineBanner.classList.add('glow-active-green');
-  } else {
-    offlineBanner.className = 'w-full bg-amber-600 text-white text-xs font-semibold py-1.5 px-4 text-center flex items-center justify-center gap-2 transition-all duration-300 transform translate-y-0';
-    offlineBannerText.textContent = 'Offline Mode - Gumagana mula sa Local Cache';
-    offlineBanner.classList.remove('glow-active-green');
-    offlineBanner.classList.add('glow-active-red');
-  }
-}
-window.addEventListener('online', updateOnlineStatus);
-window.addEventListener('offline', updateOnlineStatus);
-
-// Main rendering synchronizer
-function renderState() {
-  // 1. Model Engine Status Badge Update
-  if (state.demoMode) {
-    engineStatusBadge.className = 'px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/20 dark:text-amber-300 dark:border-amber-900 flex items-center gap-1.5';
-    engineStatusBadge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span> Mode: Mock AI';
-  } else if (state.modelDownloaded) {
-    engineStatusBadge.className = 'px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/20 dark:text-emerald-300 dark:border-emerald-900 flex items-center gap-1.5';
-    engineStatusBadge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> AI: Loaded (GPU)';
-  } else {
-    engineStatusBadge.className = 'px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-[var(--btn-bg)] text-[var(--text-default)] border border-[var(--border-default)] flex items-center gap-1.5';
-    engineStatusBadge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-slate-400"></span> AI: Unloaded';
-  }
-
-  // 2. Render Generation Button State based on Wizard selected input source content
-  let hasContent = false;
-  if (state.selectedSource === 'pdf' || state.selectedSource === 'ppt' || state.selectedSource === 'photo') {
-    hasContent = state.extractedText.trim().length > 0;
-  } else if (state.selectedSource === 'notes') {
-    hasContent = state.extractedText.trim().length > 0;
-  } else if (state.selectedSource === 'youtube') {
-    hasContent = youtubeUrlInput.value.trim().length > 0;
-  } else if (state.selectedSource === 'web') {
-    hasContent = webUrlInput.value.trim().length > 0;
-  }
-
-  if (hasContent) {
-    generateBtn.disabled = false;
-    generateBtn.className = 'w-full mt-2 py-3 rounded-lg text-xs font-bold bg-[var(--success-bg)] hover:bg-[var(--success-bg-hover)] text-white shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-98';
-  } else {
-    generateBtn.disabled = true;
-    generateBtn.className = 'w-full mt-2 py-3 rounded-lg text-xs font-bold bg-slate-100 text-slate-450 border border-[var(--border-default)] dark:bg-slate-900/40 dark:text-slate-650 cursor-not-allowed transition-all flex items-center justify-center gap-2';
-  }
-
-  // 3. Input counter
-  charCounter.textContent = `${state.extractedText.length} characters`;
-
-  // 4. Render Study Set Panels / Wizard Navigation
-  if (state.studyDeck) {
-    wizardContainer.classList.add('hidden');
-    studyDeckSection.classList.remove('hidden');
-    renderTabs();
-  } else {
-    wizardContainer.classList.remove('hidden');
-    studyDeckSection.classList.add('hidden');
-
-    // Handle Wizard Step Visibility
-    if (state.wizardStep === 1) {
-      wizardStep1.classList.remove('hidden');
-      wizardStep2.classList.add('hidden');
-      wizardProgressFill.style.width = '25%';
-
-      // Hide Back button in step 1
-      wizardBackBtn.classList.add('opacity-0', 'pointer-events-none');
-    } else {
-      wizardStep1.classList.add('hidden');
-      wizardStep2.classList.remove('hidden');
-      wizardProgressFill.style.width = '75%';
-
-      // Show Back button in step 2
-      wizardBackBtn.classList.remove('opacity-0', 'pointer-events-none');
-    }
-  }
-}
-
-// Tab Switching
-function renderTabs() {
-  if (state.activeTab === 'flashcards') {
-    tabFlashcardsBtn.className = 'border-b-2 border-[var(--accent-fg)] text-[var(--text-default)] px-1 py-3 text-xs font-bold tracking-wide uppercase flex items-center gap-2';
-    tabQuizBtn.className = 'border-b-2 border-transparent text-[var(--text-muted)] hover:text-[var(--text-default)] px-1 py-3 text-xs font-bold tracking-wide uppercase flex items-center gap-2';
-
-    tabFlashcardsView.classList.remove('hidden');
-    tabQuizView.classList.add('hidden');
-    renderFlashcards();
-  } else {
-    tabQuizBtn.className = 'border-b-2 border-[var(--accent-fg)] text-[var(--text-default)] px-1 py-3 text-xs font-bold tracking-wide uppercase flex items-center gap-2';
-    tabFlashcardsBtn.className = 'border-b-2 border-transparent text-[var(--text-muted)] hover:text-[var(--text-default)] px-1 py-3 text-xs font-bold tracking-wide uppercase flex items-center gap-2';
-
-    tabQuizView.classList.remove('hidden');
-    tabFlashcardsView.classList.add('hidden');
-    renderQuiz();
-  }
-}
-
-// Render current flashcard
-function renderFlashcards() {
-  if (!state.studyDeck || !state.studyDeck.flashcards || state.studyDeck.flashcards.length === 0) return;
-
-  const card = state.studyDeck.flashcards[state.currentCardIndex];
-  cardConceptText.textContent = card.concept;
-  cardDefinitionText.textContent = card.definition;
-
-  // Synchronize 3D flip visual state
-  if (state.cardFlipped) {
-    flashcardInner.classList.add('rotate-y-180');
-  } else {
-    flashcardInner.classList.remove('rotate-y-180');
-  }
-
-  // Progress elements
-  const currentCount = state.currentCardIndex + 1;
-  const totalCount = state.studyDeck.flashcards.length;
-  flashcardProgressText.textContent = `${currentCount} / ${totalCount}`;
-  flashcardProgressBar.style.width = `${(currentCount / totalCount) * 100}%`;
-}
-
-// Flashcard card navigation wrapper (prevents text flashing during flip)
-function navigateCard(direction) {
-  if (!state.studyDeck) return;
-
-  const changeContent = () => {
-    if (direction === 'next') {
-      state.currentCardIndex = (state.currentCardIndex + 1) % state.studyDeck.flashcards.length;
-    } else {
-      state.currentCardIndex = (state.currentCardIndex - 1 + state.studyDeck.flashcards.length) % state.studyDeck.flashcards.length;
-    }
-    renderFlashcards();
-  };
-
-  if (state.cardFlipped) {
-    state.cardFlipped = false;
-    flashcardInner.classList.remove('rotate-y-180');
-    // Wait for the card to spin halfway to hide text change
-    setTimeout(changeContent, 200);
-  } else {
-    changeContent();
-  }
-}
-
-// Render current quiz
-function renderQuiz() {
-  if (!state.studyDeck || !state.studyDeck.quiz || state.studyDeck.quiz.length === 0) return;
-
-  if (state.quizCompleted) {
-    quizQuestionCard.classList.add('hidden');
-    quizResultsCard.classList.remove('hidden');
-
-    quizFinalScore.textContent = `${state.quizScore} / ${state.studyDeck.quiz.length}`;
-    const percentage = Math.round((state.quizScore / state.studyDeck.quiz.length) * 100);
-    quizPercentageText.textContent = `${percentage}% Score - ${percentage >= 70 ? 'Mahusay! / Great Job!' : 'Subukan nating mag-aral pa / Let\'s study more'}`;
-    return;
-  }
-
-  quizQuestionCard.classList.remove('hidden');
-  quizResultsCard.classList.add('hidden');
-
-  const question = state.studyDeck.quiz[state.currentQuizIndex];
-  quizQuestionText.textContent = question.question;
-  quizProgressText.textContent = `Question ${state.currentQuizIndex + 1} of ${state.studyDeck.quiz.length}`;
-
-  // Render options list
-  quizOptionsContainer.innerHTML = '';
-  const hasAnswered = state.quizAnswers[state.currentQuizIndex] !== undefined;
-
-  question.options.forEach((option, idx) => {
-    const button = document.createElement('button');
-    button.className = 'option-btn text-left text-xs font-semibold p-4 rounded-xl border transition-all flex items-center justify-between ';
-    button.textContent = option;
-
-    if (!hasAnswered) {
-      // Unanswered state
-      button.className += 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100 hover:border-slate-300 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-350 dark:hover:bg-slate-800/80';
-      button.disabled = false;
-      button.addEventListener('click', () => selectQuizOption(idx));
-    } else {
-      // Answered state - lock actions
-      button.disabled = true;
-      const selectedIdx = state.quizAnswers[state.currentQuizIndex];
-      const correctIdx = question.correct_index;
-
-      if (idx === correctIdx) {
-        // 1. Use classList.add and ensure flex layout is active for proper alignment
-        button.classList.add('flex', 'items-center', 'justify-between', 'gap-2', 'bg-emerald-50', 'border-emerald-500', 'text-emerald-950', 'dark:bg-emerald-950/20', 'dark:border-emerald-600', 'dark:text-emerald-200');
-
-        // 2. Fixed w-4.5/h-4.5 to standard w-5/h-5
-        button.innerHTML += `
-    <svg class="w-5 h-5 text-emerald-600 dark:text-emerald-450 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path>
-    </svg>
-  `;
-      } else if (idx === selectedIdx) {
-        // 1. Ensure the button handles layout correctly (flex, centering, and spacing)
-        button.classList.add('flex', 'items-center', 'justify-between', 'gap-2', 'bg-rose-50', 'border-rose-500', 'text-rose-950', 'dark:bg-rose-950/20', 'dark:border-rose-600', 'dark:text-rose-200');
-
-        // 2. Use standard Tailwind sizes (like w-5 h-5) for the SVG
-        button.innerHTML += `
-    <svg class="w-5 h-5 text-rose-600 dark:text-rose-450 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M6 18L18 6M6 6l12 12"></path>
-    </svg>
-  `;
-      } else {
-        // Neutral disabled option
-        button.className += 'bg-slate-50 border-slate-200 text-slate-400 dark:bg-slate-900/30 dark:border-slate-850 dark:text-slate-600';
-      }
-    }
-    quizOptionsContainer.appendChild(button);
-  });
-
-  // Render feedback / explanations
-  if (hasAnswered) {
-    const selectedIdx = state.quizAnswers[state.currentQuizIndex];
-    const correctIdx = question.correct_index;
-    const isCorrect = selectedIdx === correctIdx;
-
-    quizFeedbackBox.classList.remove('hidden');
-    quizSubmitBtn.disabled = false;
-    quizSubmitBtn.className = 'w-full sm:w-auto px-6 py-2.5 rounded-xl text-xs font-bold bg-brand-600 text-white hover:bg-brand-700 transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95';
-
-    if (isCorrect) {
-      quizFeedbackBox.className = 'rounded-xl p-4 border text-xs leading-relaxed slide-in space-y-1 bg-emerald-50/50 border-emerald-250 text-emerald-950 dark:bg-emerald-950/10 dark:border-emerald-900/50 dark:text-emerald-300';
-      quizFeedbackTitle.textContent = 'Tama! / Correct! 🎉';
-      quizFeedbackTitle.className = 'font-extrabold text-sm text-emerald-700 dark:text-emerald-400 uppercase tracking-wide';
-    } else {
-      quizFeedbackBox.className = 'rounded-xl p-4 border text-xs leading-relaxed slide-in space-y-1 bg-rose-50/50 border-rose-250 text-rose-950 dark:bg-rose-950/10 dark:border-rose-900/50 dark:text-rose-300';
-      quizFeedbackTitle.textContent = 'Mali... / Try again... 💡';
-      quizFeedbackTitle.className = 'font-extrabold text-sm text-rose-700 dark:text-rose-450 uppercase tracking-wide';
-    }
-
-    quizExplanationText.textContent = question.explanation;
-
-    // Label next button depending on progress
-    if (state.currentQuizIndex === state.studyDeck.quiz.length - 1) {
-      quizSubmitBtn.querySelector('span').textContent = 'Finish Quiz / Resulta';
-    } else {
-      quizSubmitBtn.querySelector('span').textContent = 'Next Question / Susunod';
-    }
-  } else {
-    quizFeedbackBox.classList.add('hidden');
-    quizSubmitBtn.disabled = true;
-    quizSubmitBtn.className = 'w-full sm:w-auto px-6 py-2.5 rounded-xl text-xs font-bold bg-slate-100 text-slate-400 dark:bg-slate-900 dark:text-slate-700 border border-slate-200/40 dark:border-slate-850 cursor-not-allowed transition-all flex items-center justify-center gap-1.5';
-    quizSubmitBtn.querySelector('span').textContent = 'Next Question';
-  }
-}
-
-// Select option in quiz
-function selectQuizOption(index) {
-  if (state.quizAnswers[state.currentQuizIndex] !== undefined) return; // Guard
-
-  state.quizAnswers[state.currentQuizIndex] = index;
-  const question = state.studyDeck.quiz[state.currentQuizIndex];
-
-  if (index === question.correct_index) {
-    state.quizScore++;
-  }
-
-  renderQuiz();
-}
-
-// Submit Quiz Answer & Advance
-function advanceQuiz() {
-  if (state.currentQuizIndex === state.studyDeck.quiz.length - 1) {
-    state.quizCompleted = true;
-  } else {
-    state.currentQuizIndex++;
-  }
-  renderQuiz();
-}
-
-// Reset Quiz State
-function restartQuiz() {
-  state.currentQuizIndex = 0;
-  state.quizAnswers = [];
-  state.quizScore = 0;
-  state.quizCompleted = false;
-  renderQuiz();
-}
-
-// --- Wizard Step & Option Handlers ---
-function selectWizardSource(source) {
-  state.selectedSource = source;
-  state.wizardStep = 2;
-
-  // Hide all input groups first
-  inputGroupFile.classList.add('hidden');
-  inputGroupNotes.classList.add('hidden');
-  inputGroupYoutube.classList.add('hidden');
-  inputGroupPhoto.classList.add('hidden');
-  inputGroupWeb.classList.add('hidden');
-
-  // Reset content state
-  state.extractedText = '';
-  textInput.value = '';
-  youtubeUrlInput.value = '';
-  webUrlInput.value = '';
-  fileInput.value = '';
-  photoFileInput.value = '';
-  fileInfo.classList.add('hidden');
-  dropzone.classList.remove('hidden');
-  photoInfo.classList.add('hidden');
-  photoDropzone.classList.remove('hidden');
-
-  let title = 'Import study material';
-  if (source === 'pdf') {
-    title = 'Import PDF Document';
-    inputGroupFile.classList.remove('hidden');
-    document.getElementById('dropzone-text').textContent = 'Drag & Drop PDF here';
-    fileInput.accept = '.txt,.pdf';
-  } else if (source === 'ppt') {
-    title = 'Import PowerPoint Slide Deck';
-    inputGroupFile.classList.remove('hidden');
-    document.getElementById('dropzone-text').textContent = 'Drag & Drop PPT or PPTX here';
-    fileInput.accept = '.pptx,.ppt';
-  } else if (source === 'notes') {
-    title = 'Paste Study Notes';
-    inputGroupNotes.classList.remove('hidden');
-  } else if (source === 'youtube') {
-    title = 'Import YouTube Video';
-    inputGroupYoutube.classList.remove('hidden');
-  } else if (source === 'photo') {
-    title = 'Photograph your notes';
-    inputGroupPhoto.classList.remove('hidden');
-  } else if (source === 'web') {
-    title = 'Import Website Article Link';
-    inputGroupWeb.classList.remove('hidden');
-  }
-
-  wizardStep2Title.textContent = title;
-  renderState();
-}
-
-function goWizardBack() {
-  state.wizardStep = 1;
-  state.selectedSource = null;
-  renderState();
-}
-
-function toggleShowMore() {
-  state.showMoreActive = !state.showMoreActive;
-  if (state.showMoreActive) {
-    showMorePanel.style.maxHeight = '100px';
-    showMoreIcon.classList.add('rotate-180');
-    showMoreToggleBtn.querySelector('span').textContent = 'Show less';
-  } else {
-    showMorePanel.style.maxHeight = '0px';
-    showMoreIcon.classList.remove('rotate-180');
-    showMoreToggleBtn.querySelector('span').textContent = 'Show more';
-  }
-}
-
-function loadDemoNoMaterial() {
-  // Load sample Biology content
-  state.extractedText = 'Cell biology introduction. The mitochondria is the powerhouse of the cell generating ATP energy. Photosynthesis is the solar kitchen of plants converting sunlight and water into simple glucose. Eukaryotic cells store their genetic DNA instructions inside the nucleus.';
-  state.studyDeck = generateLocalMockSet(state.extractedText, state.selectedLanguage);
-
-  state.currentCardIndex = 0;
-  state.cardFlipped = false;
-  state.currentQuizIndex = 0;
-  state.quizAnswers = [];
-  state.quizScore = 0;
-  state.quizCompleted = false;
-
-  renderState();
-}
-
-// --- Setup Interactions & Listeners ---
-function setupEventListeners() {
-  // Theme button
-  darkModeBtn.addEventListener('click', toggleTheme);
-
-  // Wizard option selectors
-  document.getElementById('opt-pdf').addEventListener('click', () => selectWizardSource('pdf'));
-  document.getElementById('opt-notes').addEventListener('click', () => selectWizardSource('notes'));
-  document.getElementById('opt-ppt').addEventListener('click', () => selectWizardSource('ppt'));
-  document.getElementById('opt-youtube').addEventListener('click', () => selectWizardSource('youtube'));
-  document.getElementById('opt-photo').addEventListener('click', () => selectWizardSource('photo'));
-  document.getElementById('opt-web').addEventListener('click', () => selectWizardSource('web'));
-
-  // Show more toggle
-  showMoreToggleBtn.addEventListener('click', toggleShowMore);
-
-  // Back button and Demo trigger
-  wizardBackBtn.addEventListener('click', goWizardBack);
-  btnDemoNoMaterial.addEventListener('click', loadDemoNoMaterial);
-
-  // Output language select
-  languageSelect.addEventListener('change', (e) => {
-    state.selectedLanguage = e.target.value;
-  });
-
-  // Textarea input listeners
-  textInput.addEventListener('input', (e) => {
-    state.extractedText = e.target.value;
-    renderState();
-  });
-
-  // YouTube URL input listener
-  youtubeUrlInput.addEventListener('input', () => {
-    renderState();
-  });
-
-  // Web URL input listener
-  webUrlInput.addEventListener('input', () => {
-    renderState();
-  });
-
-  // PDF / PPT Dropzone triggers
-  dropzone.addEventListener('click', () => fileInput.click());
-
-  dropzone.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    dropzone.className = 'border-2 border-dashed border-[var(--accent-fg)] bg-[var(--accent-bg)] rounded-lg p-5 text-center cursor-pointer transition-colors flex flex-col items-center justify-center min-h-[130px]';
-  });
-
-  dropzone.addEventListener('dragleave', () => {
-    dropzone.className = 'border-2 border-dashed border-[var(--border-default)] hover:border-[var(--accent-fg)] rounded-lg p-5 text-center cursor-pointer transition-colors bg-[var(--bg-default)] flex flex-col items-center justify-center min-h-[130px]';
-  });
-
-  dropzone.addEventListener('drop', (e) => {
-    e.preventDefault();
-    dropzone.className = 'border-2 border-dashed border-[var(--border-default)] hover:border-[var(--accent-fg)] rounded-lg p-5 text-center cursor-pointer transition-colors bg-[var(--bg-default)] flex flex-col items-center justify-center min-h-[130px]';
-
-    const file = e.dataTransfer.files[0];
-    if (file) handleUploadedFile(file);
-  });
-
-  fileInput.addEventListener('change', (e) => {
-    const file = e.target.files[0];
-    if (file) handleUploadedFile(file);
-  });
-
-  // Remove uploaded file button
-  removeFileBtn.addEventListener('click', () => {
-    fileInput.value = '';
-    state.extractedText = '';
-    fileInfo.classList.add('hidden');
-    dropzone.classList.remove('hidden');
-    renderState();
-  });
-
-  // Photograph Dropzone triggers
-  photoDropzone.addEventListener('click', () => photoFileInput.click());
-
-  photoDropzone.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    photoDropzone.className = 'border-2 border-dashed border-[var(--accent-fg)] bg-[var(--accent-bg)] rounded-lg p-5 text-center cursor-pointer transition-colors flex flex-col items-center justify-center min-h-[130px]';
-  });
-
-  photoDropzone.addEventListener('dragleave', () => {
-    photoDropzone.className = 'border-2 border-dashed border-[var(--border-default)] hover:border-[var(--accent-fg)] rounded-lg p-5 text-center cursor-pointer transition-colors bg-[var(--bg-default)] flex flex-col items-center justify-center min-h-[130px]';
-  });
-
-  photoDropzone.addEventListener('drop', (e) => {
-    e.preventDefault();
-    photoDropzone.className = 'border-2 border-dashed border-[var(--border-default)] hover:border-[var(--accent-fg)] rounded-lg p-5 text-center cursor-pointer transition-colors bg-[var(--bg-default)] flex flex-col items-center justify-center min-h-[130px]';
-
-    const file = e.dataTransfer.files[0];
-    if (file) handlePhotoFile(file);
-  });
-
-  photoFileInput.addEventListener('change', (e) => {
-    const file = e.target.files[0];
-    if (file) handlePhotoFile(file);
-  });
-
-  removePhotoBtn.addEventListener('click', () => {
-    photoFileInput.value = '';
-    state.extractedText = '';
-    photoInfo.classList.add('hidden');
-    photoDropzone.classList.remove('hidden');
-    renderState();
-  });
-
-  // Trigger Study Deck Generation
-  generateBtn.addEventListener('click', generateDeck);
-
-  // Tabs clicking
-  tabFlashcardsBtn.addEventListener('click', () => {
-    state.activeTab = 'flashcards';
-    renderTabs();
-  });
-  tabQuizBtn.addEventListener('click', () => {
-    state.activeTab = 'quiz';
-    renderTabs();
-  });
-
-  // Flashcards flip & navigation triggers
-  flashcardContainer.addEventListener('click', () => {
-    state.cardFlipped = !state.cardFlipped;
-    renderFlashcards();
-  });
-  prevCardBtn.addEventListener('click', () => navigateCard('prev'));
-  nextCardBtn.addEventListener('click', () => navigateCard('next'));
-
-  // Quiz progression triggers
-  quizSubmitBtn.addEventListener('click', advanceQuiz);
-  quizRestartBtn.addEventListener('click', restartQuiz);
-}
-
-// File loading and parsing selector (PDF, PPT, TXT)
-async function handleUploadedFile(file) {
-  const isPPT = file.name.endsWith('.pptx') || file.name.endsWith('.ppt');
-  const isTXT = file.name.endsWith('.txt') || file.type === 'text/plain';
-  const isPDF = file.name.endsWith('.pdf') || file.type === 'application/pdf';
-
-  if (!isTXT && !isPDF && !isPPT) {
-    alert('Format error: Mangyaring pumili lamang ng TXT, PDF o PPT/PPTX na file.');
-    return;
-  }
-
-  // Visual file details update
-  dropzone.classList.add('hidden');
-  fileInfo.classList.remove('hidden');
-  fileNameText.textContent = file.name;
-  fileSizeText.textContent = `${(file.size / (1024 * 1024)).toFixed(2)} MB`;
-
+// Setup PDF.js worker dynamically via Blob URL to bypass cross-origin Web Worker restrictions
+let resolvedWorkerUrl = null;
+async function getPdfWorkerUrl() {
+  if (resolvedWorkerUrl) return resolvedWorkerUrl;
+  const cdnUrl = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.3.136/pdf.worker.min.mjs';
   try {
-    if (isTXT) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        state.extractedText = e.target.result;
-        renderState();
-      };
-      reader.readAsText(file);
-    } else if (isPDF) {
-      fileNameText.textContent = `Parsing: ${file.name}...`;
-      const buffer = await file.arrayBuffer();
-      const text = await extractTextFromPDF(buffer);
-      state.extractedText = text;
-      fileNameText.textContent = file.name;
-      renderState();
-    } else if (isPPT) {
-      fileNameText.textContent = `Extracting slides: ${file.name}...`;
-      // Simulate slide parsing delay
-      setTimeout(() => {
-        state.extractedText = `Slide 1: Intro to programming. JavaScript is the programming language that powers the web client-side. HTML is the bones, CSS is clothes, JS is muscles.
-Slide 2: Waiter analogy. API is the waiter in a restaurant taking orders to the kitchen (server) and returning responses to the user.
-Slide 3: Database storage. Database stores structured client accounts and history safely.`;
-        fileNameText.textContent = file.name;
-        renderState();
-      }, 800);
-    }
+    const response = await fetch(cdnUrl);
+    if (!response.ok) throw new Error("Worker fetch failed");
+    const blob = await response.blob();
+    resolvedWorkerUrl = URL.createObjectURL(blob);
+    return resolvedWorkerUrl;
   } catch (err) {
-    console.error('[GabayAI] File loading error:', err);
-    fileInfo.classList.add('hidden');
-    dropzone.classList.remove('hidden');
-    state.extractedText = '';
-    renderState();
+    console.warn('[MulatAI] Failed to fetch PDF.js worker via Blob URL, falling back to direct CDN:', err);
+    return cdnUrl;
   }
 }
 
-// Extraction logic from PDF
-async function extractTextFromPDF(arrayBuffer) {
+// Helper: PDF Text Extractor
+async function extractTextFromPDF(file) {
+  return Promise.race([
+    (async () => {
+      const arrayBuffer = await file.arrayBuffer();
+      
+      // Resolve worker dynamically
+      try {
+        const workerUrl = await getPdfWorkerUrl();
+        pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
+      } catch (workerErr) {
+        console.warn("[MulatAI] Error setting up workerSrc:", workerErr);
+      }
+
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      let fullText = '';
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const textContent = await page.getTextContent();
+        const pageText = textContent.items.map(item => item.str).join(' ');
+        fullText += pageText + '\n';
+      }
+      return fullText.trim();
+    })(),
+    new Promise((_, reject) => 
+      setTimeout(() => reject(new Error("PDF text extraction timed out (15 seconds limit). The file might be corrupted or too complex.")), 15000)
+    )
+  ]);
+}
+
+// Helper: Image Text Extractor via Tesseract OCR
+async function extractTextFromImage(file) {
+  const worker = await createWorker('eng');
+  const { data: { text } } = await worker.recognize(file);
+  await worker.terminate();
+  return text.trim();
+}
+
+// Helper: Fetch website content via CORS proxy
+async function fetchAndExtractWebsite(url) {
   try {
-    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-    let extractedText = '';
-    for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i);
-      const content = await page.getTextContent();
-      const pageText = content.items.map(item => item.str).join(' ');
-      extractedText += `--- Page ${i} ---\n${pageText}\n\n`;
-    }
-    return extractedText;
-  } catch (e) {
-    console.error('[GabayAI] PDF Parser error:', e);
-    alert('Maling PDF formatting. Hindi ma-parse ang teksto.');
-    throw e;
+    const response = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`);
+    if (!response.ok) throw new Error("Network response was not ok");
+    const html = await response.text();
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    
+    // Remove scripts, styles, navs, headers, footers to get clean text
+    const elementsToRemove = doc.querySelectorAll('script, style, nav, header, footer, noscript');
+    elementsToRemove.forEach(el => el.remove());
+    
+    const paragraphs = Array.from(doc.querySelectorAll('p, h1, h2, h3, li'))
+      .map(el => el.textContent.trim())
+      .filter(text => text.length > 20);
+      
+    return paragraphs.join('\n\n');
+  } catch (err) {
+    console.warn("CORS proxy fetch failed, falling back to simulated webpage parsing:", err);
+    return `Article content from ${url}: Offline adaptation, client-side browser logic, WebGPU performance optimization, and Service Worker caching strategies. These techniques ensure web applications load faster and work entirely offline.`;
   }
 }
 
-// Photograph Notes simulation helper
-function handlePhotoFile(file) {
-  if (!file.type.startsWith('image/')) {
-    alert('Format error: Mangyaring pumili lamang ng image file (PNG/JPG).');
-    return;
+// Helper: Extract simulated YouTube transcript
+async function fetchAndExtractYouTube(url) {
+  const videoIdMatch = url.match(/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/||user\/[^\/]+\/)|youtu\.be\/)([^"&?\/ ]{11})/);
+  const videoId = videoIdMatch ? videoIdMatch[1] : '';
+  
+  if (videoId) {
+    return `YouTube Video (ID: ${videoId}) Transcript: This tutorial covers browser-based WebGPU and AI development. Today, we will look at how to run the Qwen 2.5 0.5B model client-side using Transformers.js. We will also build an offline database with Dexie and extract text from PDFs and images.`;
   }
-  photoDropzone.classList.add('hidden');
-  photoInfo.classList.remove('hidden');
-  photoFileName.textContent = file.name;
-  photoFileSize.textContent = `${(file.size / (1024 * 1024)).toFixed(2)} MB`;
-
-  photoFileName.textContent = 'Scanning notes...';
-  // Simulate OCR text extraction after a short delay
-  setTimeout(() => {
-    state.extractedText = 'Photograph notes content. Cell biology summary. The mitochondria is the powerhouse of the cell generating ATP energy. Photosynthesis is the solar kitchen of plants converting sunlight and water into simple glucose. Eukaryotic cells store their genetic DNA instructions inside the nucleus.';
-    photoFileName.textContent = file.name;
-    renderState();
-  }, 1000);
+  return `Simulated YouTube Transcript: Welcome to our educational video on biology and photosynthesis. Today we're learning how plants absorb light using chlorophyll to split water and carbon dioxide.`;
 }
 
-// JSON validation helper
-function cleanAndParseJSON(str) {
-  let cleaned = str.trim();
+// Global Application States
+let isModelLoaded = false;
+let currentDeck = null;
+let currentFlashcardIndex = 0;
+let currentQuizIndex = 0;
+let quizScore = 0;
+let selectedFileContent = '';
+let currentFilename = 'Pasted Notes';
+let currentMaterialId = null;
 
-  // Clean markdown delimiters if model includes it
-  if (cleaned.startsWith('```')) {
-    cleaned = cleaned.replace(/^```(json)?/i, '').replace(/```$/, '').trim();
+// Wizard Step Configuration
+const optionConfigs = {
+  'opt-pdf': {
+    title: 'Import study material: PDF',
+    group: 'input-group-file',
+    progress: '60%'
+  },
+  'opt-notes': {
+    title: 'Type or paste your notes',
+    group: 'input-group-notes',
+    progress: '60%'
+  },
+  'opt-ppt': {
+    title: 'Import study material: PowerPoint',
+    group: 'input-group-file',
+    progress: '60%'
+  },
+  'opt-youtube': {
+    title: 'Import study material: YouTube Link',
+    group: 'input-group-youtube',
+    progress: '60%'
+  },
+  'opt-photo': {
+    title: 'Photograph your notes',
+    group: 'input-group-photo',
+    progress: '60%'
+  },
+  'opt-web': {
+    title: 'Import study material: Website Link',
+    group: 'input-group-web',
+    progress: '60%'
   }
+};
 
-  // Find first { and last } to grab only the JSON
-  const start = cleaned.indexOf('{');
-  const end = cleaned.lastIndexOf('}');
-  if (start !== -1 && end !== -1) {
-    cleaned = cleaned.slice(start, end + 1);
+// Theme Initialization (Run immediately to prevent theme flashing)
+const initTheme = () => {
+  const savedTheme = localStorage.getItem('theme');
+  const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const isDark = savedTheme === 'dark' || (!savedTheme && systemPrefersDark);
+  
+  if (isDark) {
+    document.documentElement.classList.add('dark');
+    document.getElementById('sun-icon')?.classList.remove('hidden');
+    document.getElementById('moon-icon')?.classList.add('hidden');
+  } else {
+    document.documentElement.classList.remove('dark');
+    document.getElementById('sun-icon')?.classList.add('hidden');
+    document.getElementById('moon-icon')?.classList.remove('hidden');
   }
+};
+initTheme();
 
-  return JSON.parse(cleaned);
-}
+// Progress callback to update download UI elements
+const progressCallback = (data) => {
+  const progressBar = document.getElementById('download-progress');
+  const statusText = document.getElementById('status-text');
+  const engineStatusBadge = document.getElementById('engine-status-badge');
 
-// Generate the Flashcards and Quizzes
-async function generateDeck() {
-  if (!state.demoMode && (!state.modelDownloaded || !generator)) {
-    alert('AI Engine not ready: I-download muna ang local model o paganahin ang Demo Mode.');
-    return;
-  }
+  if (data.status === 'downloading') {
+    const progress = data.progress || 0;
+    const percentage = Math.round(progress);
 
-  // Pre-fill text content for simulated YouTube and Web sources
-  if (state.selectedSource === 'youtube') {
-    state.extractedText = `YouTube video transcript on Biology: Mitochondria generate chemical energy ATP required to power the cell. Photosynthesis is the solar kitchen of plants converting sunlight and water into simple glucose. Eukaryotic cells store their genetic DNA instructions inside the nucleus.`;
-  } else if (state.selectedSource === 'web') {
-    state.extractedText = `Website page article content on Computer Science: JavaScript is the programming language that powers modern interactive web clients. API is the waiter in a restaurant taking orders to the server. Database is a structured filing cabinet storing records.`;
-  }
-
-  // Set visual loader state
-  wizardContainer.classList.add('hidden');
-  studyDeckSection.classList.add('hidden');
-  generatingLoader.classList.remove('hidden');
-  generateBtn.disabled = true;
-
-  // Let DOM update loader before locking CPU with inference
-  setTimeout(async () => {
-    try {
-      if (state.demoMode) {
-        // Call Rule-Based Mock Generator
-        state.studyDeck = generateLocalMockSet(state.extractedText, state.selectedLanguage);
+    if (progressBar) {
+      if (progressBar.tagName === 'PROGRESS') {
+        progressBar.value = progress / 100;
       } else {
-        // Run Local LLM Inference using WebGPU
-        let promptLanguageInstruction = '';
-        if (state.selectedLanguage === 'taglish') {
-          promptLanguageInstruction = "You are a friendly Taglish peer. Create exactly 3 flashcards and 3 quiz questions from the user text. Use local Filipino analogies. Output raw JSON format matching this structure: { \"flashcards\": [{ \"concept\": \"\", \"definition\": \"\" }], \"quiz\": [{ \"question\": \"\", \"options\": [\"\", \"\", \"\", \"\"], \"correct_index\": 0, \"explanation\": \"\" }] }";
-        } else if (state.selectedLanguage === 'filipino') {
-          promptLanguageInstruction = "Ikaw ay isang kaibigang nagtuturo. Gumawa ng eksaktong 3 flashcards at 3 quiz questions mula sa text sa wikang Filipino. Gumamit ng mga lokal na halimbawa. Output raw JSON format matching this structure: { \"flashcards\": [{ \"concept\": \"\", \"definition\": \"\" }], \"quiz\": [{ \"question\": \"\", \"options\": [\"\", \"\", \"\", \"\"], \"correct_index\": 0, \"explanation\": \"\" }] }";
-        } else {
-          promptLanguageInstruction = "You are a friendly study peer. Create exactly 3 flashcards and 3 quiz questions from the user text in English. Use clear analogies. Output raw JSON format matching this structure: { \"flashcards\": [{ \"concept\": \"\", \"definition\": \"\" }], \"quiz\": [{ \"question\": \"\", \"options\": [\"\", \"\", \"\", \"\"], \"correct_index\": 0, \"explanation\": \"\" }] }";
-        }
-
-        const messages = [
-          { role: 'system', content: promptLanguageInstruction },
-          { role: 'user', content: `Analyze this study material:\n\n${state.extractedText}\n\nProvide only the raw JSON output matching the format exactly.` }
-        ];
-
-        console.log('[GabayAI] Triggering Qwen2.5 WebGPU Inference...');
-        const response = await generator(messages, {
-          max_new_tokens: 1024,
-          temperature: 0.2
-        });
-
-        const rawResult = response[0].generated_text.slice(-1)[0].content;
-        console.log('[GabayAI] Model Output:', rawResult);
-        state.studyDeck = cleanAndParseJSON(rawResult);
+        progressBar.style.width = `${percentage}%`;
       }
-
-      // Initialize slide states
-      state.currentCardIndex = 0;
-      state.cardFlipped = false;
-      state.currentQuizIndex = 0;
-      state.quizAnswers = [];
-      state.quizScore = 0;
-      state.quizCompleted = false;
-
-      generatingLoader.classList.add('hidden');
-      studyDeckSection.classList.remove('hidden');
-      renderState();
-    } catch (err) {
-      console.error('[GabayAI] Generation error:', err);
-      alert('Inference error: Nagkaproblema sa pagproseso ng JSON. Mangyaring subukan muli o lumipat sa Demo Mode.');
-      generatingLoader.classList.add('hidden');
-      wizardContainer.classList.remove('hidden');
-      renderState();
-    }
-  }, 100);
-}
-
-// --- Dynamic Content Mock Generator ---
-function generateLocalMockSet(text, language) {
-  const clean = text.trim();
-
-  // Pick curated set if target phrases are present, or fallback to text segmentation parser
-  const hasBiology = /cell|mitochondria|biology|photosynthesis|halaman|organ/i.test(clean);
-  const hasKasaysayan = /rizal|bonifacio|rebolusyon|pilipinas|kasaysayan|history|kastila/i.test(clean);
-  const hasProgramming = /javascript|code|programming|computer|api|database|software/i.test(clean);
-
-  if (hasBiology) {
-    return getBiologyDeck(language);
-  } else if (hasKasaysayan) {
-    return getKasaysayanDeck(language);
-  } else if (hasProgramming) {
-    return getProgrammingDeck(language);
-  } else {
-    return parseTextToDeck(clean, language);
-  }
-}
-
-// Static mock deck data: Biology
-function getBiologyDeck(lang) {
-  if (lang === 'taglish') {
-    return {
-      flashcards: [
-        { concept: 'Mitochondria', definition: 'Ang powerhouse of the cell. Parang Meralco ng cell natin—gumagawa ng ATP (energy) para makagalaw at makatrabaho ang buong organism.' },
-        { concept: 'Photosynthesis', definition: 'Proseso kung saan gumagawa ng sariling pagkain ang halaman gamit ang sunlight. Parang solar panel kitchen ng kalikasan!' },
-        { concept: 'Nucleus', definition: 'Ang control center ng cell kung saan nakatago ang DNA. Parang Munisipyo o Kapitolyo na nagdedesisyon sa lahat ng gagawin ng cell.' }
-      ],
-      quiz: [
-        {
-          question: 'Alin sa mga sumusunod ang nagsisilbing "Meralco o Powerhouse" ng ating cells?',
-          options: ['Nucleus', 'Mitochondria', 'Cell Membrane', 'Chloroplast'],
-          correct_index: 1,
-          explanation: 'Mitochondria! Dahil ito ang responsable sa cellular respiration at paggawa ng ATP na nagsisilbing panggatong o kuryente ng cell.'
-        },
-        {
-          question: 'Ano ang pinakamagandang analogo para sa Photosynthesis?',
-          options: ['Paggawa ng kuryente sa hydro dam', 'Pagluluto sa solar panel kitchen', 'Pagtatapon ng basura sa basurahan', 'Paghahatid ng sulat ng kartero'],
-          correct_index: 1,
-          explanation: 'Pagluluto sa solar panel kitchen! Kasi ang halaman ay kumukuha ng liwanag (solar energy) para gumawa ng sariling asukal (pagkain).'
-        },
-        {
-          question: 'Saan nakaimbak ang control operations at DNA sa loob ng isang eukaryotic cell?',
-          options: ['Ribosome', 'Cytoplasm', 'Nucleus', 'Lysosome'],
-          correct_index: 2,
-          explanation: 'Nucleus! Ito ang nagsisilbing main executive branch o munisipyo na nag-uutos sa cell gamit ang blueprint ng DNA.'
-        }
-      ]
-    };
-  } else if (lang === 'filipino') {
-    return {
-      flashcards: [
-        { concept: 'Mitochondria', definition: 'Ang gumagawa ng lakas ng cell. Ito ang nagbibigay ng enerhiya upang ang mga bahagi ng halaman o hayop ay gumana ng maayos.' },
-        { concept: 'Photosynthesis', definition: 'Ang pamamaraan ng paglikha ng pagkain ng mga halaman sa pamamagitan ng sikat ng araw at tubig.' },
-        { concept: 'Nucleus', definition: 'Ang sentro ng pamamahala ng cell na naglalaman ng mga henetikong impormasyon (DNA).' }
-      ],
-      quiz: [
-        {
-          question: 'Ano ang bahagi ng cell na gumagawa ng lakas at enerhiya?',
-          options: ['Nucleus', 'Mitochondria', 'Chloroplast', 'Cytoplasm'],
-          correct_index: 1,
-          explanation: 'Mitochondria ang nagsisilbing pangunahing tagagawa ng enerhiya para sa cell upang ito ay mabuhay.'
-        },
-        {
-          question: 'Paano gumagawa ng pagkain ang mga halaman?',
-          options: ['Sa pamamagitan ng Mitochondria', 'Sa pamamagitan ng Photosynthesis', 'Sa pamamagitan ng Pagsipsip ng lupa', 'Sa pamamagitan ng Kagubatan'],
-          correct_index: 1,
-          explanation: 'Photosynthesis ang tawag sa proseso ng paggawa ng pagkain ng mga halaman gamit ang init ng araw.'
-        },
-        {
-          question: 'Ano ang nagsisilbing utak o sentro ng pag-uutos sa cell?',
-          options: ['Ribosome', 'Nucleus', 'Cell Wall', 'Vacuole'],
-          correct_index: 1,
-          explanation: 'Nucleus ang naglalaman ng DNA at nagdidikta ng mga aktibidad ng buong cell.'
-        }
-      ]
-    };
-  } else {
-    return {
-      flashcards: [
-        { concept: 'Mitochondria', definition: 'The powerhouse of the cell. It generates chemical energy (ATP) required to power the cell\'s biochemical reactions.' },
-        { concept: 'Photosynthesis', definition: 'The process used by plants to convert light energy, usually from the sun, into chemical energy (glucose).' },
-        { concept: 'Nucleus', definition: 'The membrane-enclosed organelle that contains the genetic material (DNA) and acts as the cell\'s command center.' }
-      ],
-      quiz: [
-        {
-          question: 'Which organelle is widely known as the powerhouse of the cell?',
-          options: ['Endoplasmic Reticulum', 'Mitochondria', 'Lysosome', 'Golgi Apparatus'],
-          correct_index: 1,
-          explanation: 'Mitochondria generate adenosine triphosphate (ATP), the primary energy currency of the cell.'
-        },
-        {
-          question: 'What is the main output of photosynthesis used by plants for food?',
-          options: ['Carbon Dioxide', 'Oxygen', 'Glucose', 'Nitrogen'],
-          correct_index: 2,
-          explanation: 'Glucose is the simple sugar plants generate during photosynthesis to store energy.'
-        },
-        {
-          question: 'Where is the DNA of a eukaryotic cell primarily stored?',
-          options: ['Nucleus', 'Ribosome', 'Vacuole', 'Cytoplasm'],
-          correct_index: 0,
-          explanation: 'The nucleus houses the chromosomes containing the cell\'s genetic instructions.'
-        }
-      ]
-    };
-  }
-}
-
-// Static mock deck data: Kasaysayan
-function getKasaysayanDeck(lang) {
-  if (lang === 'taglish') {
-    return {
-      flashcards: [
-        { concept: 'Jose Rizal', definition: 'Pambansang bayani ng Pilipinas. Ginamit ang pluma kaysa espada—parang 19th-century keyboard warrior na lumaban sa kolonyalismo gamit ang Noli at El Fili.' },
-        { concept: 'Katipunan (KKK)', definition: 'Lihim na samahan na itinatag ni Andres Bonifacio. Sila ang nagsimula ng rebolusyon matapos punitin ang sedula sa Sigaw ng Pugad Lawin (parang nag-leave sa GC ng mga Kastila!).' },
-        { concept: 'Gomburza', definition: 'Tatlong paring martir (Gomez, Burgos, Zamora) na binitay sa garote. Ang kanilang kamatayan ang naging mitsa upang magising ang pagka-nasyonalismo ni Rizal at ng mga Pilipino.' }
-      ],
-      quiz: [
-        {
-          question: 'Paano nilabanan ni Jose Rizal ang pamahalaang Kastila?',
-          options: ['Sa pamamagitan ng pag-organisa ng militar', 'Sa pamamagitan ng panulat, nobela, at diplomasya', 'Sa pamamagitan ng pakikipagkasundo sa Amerika', 'Sa pamamagitan ng pagpunit ng sedula'],
-          correct_index: 1,
-          explanation: 'Panulat at nobela! Isinulat niya ang Noli Me Tangere at El Filibusterismo upang ilantad ang katiwalian ng mga Kastila nang walang dumanak na dugo.'
-        },
-        {
-          question: 'Sino ang nagtatag ng lihim na samahang Katipunan (KKK)?',
-          options: ['Jose Rizal', 'Andres Bonifacio', 'Emilio Aguinaldo', 'Apolinario Mabini'],
-          correct_index: 1,
-          explanation: 'Andres Bonifacio! Itinatag niya ang KKK sa Tondo, Maynila upang makamit ang kalayaan mula sa Espanya sa pamamagitan ng rebolusyon.'
-        },
-        {
-          question: 'Ano ang epekto ng pagbitay sa tatlong paring Gomburza?',
-          options: ['Natakot ang mga Pilipino at sumuko', 'Nagising ang damdaming nasyonalismo ng mga Pilipino', 'Umalis ang mga Kastila sa bansa', 'Sumuko si Andres Bonifacio'],
-          correct_index: 1,
-          explanation: 'Nagising ang nasyonalismo! Ang kawalang-katarungan sa pagbitay sa kanila ang nag-udyok sa marami, kasama na si Rizal, na simulan ang Kilusang Propaganda.'
-        }
-      ]
-    };
-  } else if (lang === 'filipino') {
-    return {
-      flashcards: [
-        { concept: 'Jose Rizal', definition: 'Ang pambansang bayani ng Pilipinas na sumulat ng mga nobelang nagpaalsa sa kaisipan ng mamamayan laban sa mga Kastila.' },
-        { concept: 'Katipunan (KKK)', definition: 'Ang rebolusyonaryong samahan na itinatag ni Andres Bonifacio upang makamit ang kalayaan sa pamamagitan ng armas.' },
-        { concept: 'Gomburza', definition: 'Ang tatlong paring sekular na pinatay sa pamamagitan ng garote na nagbigay inspirasyon sa Kilusang Propaganda.' }
-      ],
-      quiz: [
-        {
-          question: 'Sino ang pambansang bayani na sumulat ng Noli Me Tangere?',
-          options: ['Andres Bonifacio', 'Jose Rizal', 'Marcelo H. Del Pilar', 'Juan Luna'],
-          correct_index: 1,
-          explanation: 'Si Jose Rizal ang sumulat ng Noli at El Fili na nagbukas sa mata ng mga Pilipino sa pang-aabuso.'
-        },
-        {
-          question: 'Ano ang pangunahing layunin ng Katipunan?',
-          options: ['Makipagkaibigan sa Espanya', 'Makipagpalitan ng kalakal', 'Makipaglaban para sa ganap na kalayaan ng bansa', 'Ipalaganap ang bagong relihiyon'],
-          correct_index: 2,
-          explanation: 'Ganap na kalayaan! Nilayon ng Katipunan na palayasin ang mga kolonyalistang Kastila sa pamamagitan ng pag-aalsa.'
-        },
-        {
-          question: 'Sila ang tatlong pari na binitay na nag-udyok sa pagkakaisa ng mga Pilipino:',
-          options: ['Gomez, Burgos, Zamora', 'Rizal, Lopez, Jaena', 'Aguinaldo, Bonifacio, Mabini', 'Luna, del Pilar, Jacinto'],
-          correct_index: 0,
-          explanation: 'Gomez, Burgos, at Zamora (Gomburza) ang binitay sa Bagumbayan na pinagbintangan sa Pag-aalsa sa Cavite.'
-        }
-      ]
-    };
-  } else {
-    return {
-      flashcards: [
-        { concept: 'Jose Rizal', definition: 'The national hero of the Philippines. He advocated for reforms using his pen instead of weapons, writing Noli Me Tangere and El Filibusterismo.' },
-        { concept: 'Katipunan (KKK)', definition: 'A secret revolutionary society founded by Andres Bonifacio in 1892 to gain independence from Spain through armed revolt.' },
-        { concept: 'Gomburza', definition: 'Three secular priests (Gomez, Burgos, Zamora) executed in 1872, whose martyrdom triggered the awakening of Philippine nationalism.' }
-      ],
-      quiz: [
-        {
-          question: 'Which method did Jose Rizal primarily use to fight Spanish colonization?',
-          options: ['Armed revolution', 'Literary works and peaceful advocacy', 'Guerrilla warfare', 'Alliances with foreign empires'],
-          correct_index: 1,
-          explanation: 'Rizal wrote exposes and novels to peacefully demand reforms from the Spanish Crown, inspiring the reform movement.'
-        },
-        {
-          question: 'Who is known as the Father of the Katipunan?',
-          options: ['Jose Rizal', 'Andres Bonifacio', 'Emilio Aguinaldo', 'Apolinario Mabini'],
-          correct_index: 1,
-          explanation: 'Andres Bonifacio founded the Katipunan (KKK) and led the initial phase of the revolution.'
-        },
-        {
-          question: 'What historical event in 1872 is credited with awakening Rizal\'s political activism?',
-          options: ['The opening of the Suez Canal', 'The execution of Gomburza', 'The founding of La Liga Filipina', 'The Cry of Pugad Lawin'],
-          correct_index: 1,
-          explanation: 'The execution of the three Gomburza priests deeply affected Rizal, prompting him to dedicate El Filibusterismo to them.'
-        }
-      ]
-    };
-  }
-}
-
-// Static mock deck data: Programming
-function getProgrammingDeck(lang) {
-  if (lang === 'taglish') {
-    return {
-      flashcards: [
-        { concept: 'JavaScript', definition: 'Ang muscles at brain ng websites. Kung ang HTML ay buto at ang CSS ay damit, JS naman ang nagpapagalaw (interactivity, logic) sa screen.' },
-        { concept: 'API', definition: 'Application Programming Interface. Parang waiter sa restaurant—kumukuha ng order mo (request), dinadala sa kusina (server), at ibinabalik ang pagkain (response).' },
-        { concept: 'Database', definition: 'Lugar kung saan nakatabi ang organized data. Parang digital na locker o filing cabinet kung saan mabilis maghanap at magtago ng impormasyon.' }
-      ],
-      quiz: [
-        {
-          question: 'Sa paggawa ng website, alin ang nagsisilbing "muscles at brain" na gumagawa ng interactive features?',
-          options: ['HTML', 'CSS', 'JavaScript', 'SQL'],
-          correct_index: 2,
-          explanation: 'JavaScript! Habang HTML ay structur at CSS ay style, JS ang nagpapatakbo ng interactive actions tulad ng popups at dynamic calculations.'
-        },
-        {
-          question: 'Ano ang ginagawa ng isang API batay sa analogy ng restaurant waiter?',
-          options: ['Nagluluto ng pagkain sa kusina', 'Naghahatid ng request sa server at nagdadala ng response sa kliyente', 'Naghuhugas ng plato sa likod', 'Nag-aayos ng lamesa'],
-          correct_index: 1,
-          explanation: 'Naghahatid ng request at response! API ang nagdudugtong sa client interface at sa remote server backend.'
-        },
-        {
-          question: 'Ano ang pangunahing silbi ng isang Database?',
-          options: ['Mag-compile ng code para maging executable', 'Mabilis at maayos na mag-imbak ng impormasyon', 'Mag-ayos ng layout ng website', 'Mag-block ng virus'],
-          correct_index: 1,
-          explanation: 'Mag-imbak ng impormasyon! Nagbibigay ito ng mabilisang storage, query at pagbabago ng raw application data.'
-        }
-      ]
-    };
-  } else if (lang === 'filipino') {
-    return {
-      flashcards: [
-        { concept: 'JavaScript', definition: 'Ang wika ng kompyuter na nagdaragdag ng interaktibidad sa mga pahina ng internet.' },
-        { concept: 'API', definition: 'Ugnayan na nagpapahintulot sa dalawang programa na mag-usap at magpalitan ng datos sa isa\'t isa.' },
-        { concept: 'Database', definition: 'Isang organisadong imbakan ng mga elektronikong impormasyon o datos.' }
-      ],
-      quiz: [
-        {
-          question: 'Ano ang pangunahing gamit ng JavaScript sa web development?',
-          options: ['I-format ang disenyo', 'Magdagdag ng interaktibong lohika sa website', 'Gumawa ng mga lamesa sa database', 'Magpadala ng email'],
-          correct_index: 1,
-          explanation: 'Ginagamit ang JavaScript upang maging buhay at interaktibo ang isang static na HTML page.'
-        },
-        {
-          question: 'Ano ang kahulugan ng API?',
-          options: ['Application Programming Interface', 'Access Program Internet', 'Automatic Protocol Integration', 'Address Path Identifier'],
-          correct_index: 0,
-          explanation: 'API o Application Programming Interface ang nag-uugnay sa magkakaibang aplikasyon.'
-        },
-        {
-          question: 'Saan natin itinatabi ang mga impormasyon tulad ng username at password ng user sa paraang maayos?',
-          options: ['API', 'CSS Stylesheet', 'Database', 'Web Browser Cache'],
-          correct_index: 2,
-          explanation: 'Database ang nagsisilbing ligtas at organisadong imbakan ng pangmatagalang datos ng app.'
-        }
-      ]
-    };
-  } else {
-    return {
-      flashcards: [
-        { concept: 'JavaScript', definition: 'The scripting language that enables interactive web pages. It controls behavior, handles calculations, and updates page elements dynamically.' },
-        { concept: 'API', definition: 'Application Programming Interface. A set of rules allowing different software applications to communicate and transfer data between each other.' },
-        { concept: 'Database', definition: 'An organized collection of structured data, typically stored electronically in a computer system for fast retrieval.' }
-      ],
-      quiz: [
-        {
-          question: 'Which technology provides the interactive logic on modern web browsers?',
-          options: ['HTML', 'CSS', 'JavaScript', 'XML'],
-          correct_index: 2,
-          explanation: 'JavaScript is the programming language that runs in the browser, enabling dynamic changes without reloading.'
-        },
-        {
-          question: 'What is the primary role of an API?',
-          options: ['To render the graphical user interface', 'To allow two software modules to exchange data', 'To compile code into machine language', 'To secure network ports'],
-          correct_index: 1,
-          explanation: 'APIs acts as messengers, taking requests to a system and bringing back the responses.'
-        },
-        {
-          question: 'Which of the following describes a Database?',
-          options: ['A tool to compile JavaScript', 'A structured electronic storage of data', 'An internet domain name server', 'A graphic designing utility'],
-          correct_index: 1,
-          explanation: 'A database is optimized to store, organize, query, and manage digital information.'
-        }
-      ]
-    };
-  }
-}
-
-// Fallback rule-based parsing engine for any arbitrary user text
-function parseTextToDeck(text, lang) {
-  // Extract sentences
-  const sentences = text
-    .split(/[.!?\n]+/)
-    .map(s => s.trim())
-    .filter(s => s.length > 20); // Keep meaningful length
-
-  const flashcards = [];
-  const quiz = [];
-
-  // Default templates to pad if text parsing doesn't yield enough cards
-  const defaults = getBiologyDeck(lang).flashcards;
-
-  const maxCards = 3;
-  for (let i = 0; i < maxCards; i++) {
-    let concept = '';
-    let definition = '';
-
-    if (sentences[i]) {
-      const sentence = sentences[i];
-      // Try to split on defining terms
-      const splitKeywords = [/ refers to /i, / is /i, / are /i, / ay /i, / ang /i, / tinatawag na /i, / tumutukoy sa /i, /:/];
-      let splitPoint = -1;
-      let matchedKeyword = '';
-
-      for (const regex of splitKeywords) {
-        const match = sentence.match(regex);
-        if (match && match.index !== undefined) {
-          splitPoint = match.index;
-          matchedKeyword = match[0];
-          break;
-        }
-      }
-
-      if (splitPoint !== -1) {
-        concept = sentence.slice(0, splitPoint).trim();
-        definition = sentence.slice(splitPoint + matchedKeyword.length).trim();
-
-        // Clean up Concept length (limit to 3-4 words)
-        if (concept.split(/\s+/).length > 4) {
-          concept = concept.split(/\s+/).slice(0, 3).join(' ');
-        }
-        // Capitalize definition first letter
-        definition = definition.charAt(0).toUpperCase() + definition.slice(1);
-      } else {
-        // Fallback split: grab first 3 words as concept
-        const words = sentence.split(/\s+/);
-        concept = words.slice(0, 3).join(' ');
-        definition = sentence;
-      }
-
-      // Clean up concept string
-      concept = concept.replace(/^--- Page \d+ ---/g, '').trim();
-      concept = concept.charAt(0).toUpperCase() + concept.slice(1);
-
-      if (concept.length < 3) {
-        concept = defaults[i].concept;
-        definition = sentence;
-      }
-    } else {
-      // Pad using default decks
-      concept = defaults[i].concept;
-      definition = defaults[i].definition;
     }
 
-    flashcards.push({ concept, definition });
+    if (statusText) {
+      statusText.textContent = `Downloading model: ${percentage}% (${data.file})`;
+    }
+    
+    if (engineStatusBadge) {
+      engineStatusBadge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span> AI: Loading (${percentage}%)`;
+    }
+  } else if (data.status === 'done') {
+    if (statusText) {
+      statusText.textContent = `Loaded file: ${data.file}`;
+    }
+  } else if (data.status === 'ready') {
+    if (statusText) {
+      statusText.textContent = 'Model engine ready!';
+    }
+    const loaderPanel = document.getElementById('model-loader-panel');
+    if (loaderPanel) {
+      setTimeout(() => {
+        loaderPanel.classList.add('hidden');
+      }, 1000);
+    }
+  }
+};
+
+// Initialize the WebGPU pipeline
+async function initPipeline() {
+  const statusText = document.getElementById('status-text');
+  const engineStatusBadge = document.getElementById('engine-status-badge');
+  const loaderPanel = document.getElementById('model-loader-panel');
+
+  if (statusText) {
+    statusText.textContent = 'Loading MulatAI WebGPU model (approx. 300MB)...';
   }
 
-  // Generate 3 Multiple-Choice quiz questions using the flashcard terms
-  for (let i = 0; i < maxCards; i++) {
-    const card = flashcards[i];
+  try {
+    await initAIEngine(progressCallback);
+    isModelLoaded = true;
 
-    let questionText = '';
-    let explanationText = '';
-
-    if (lang === 'taglish') {
-      questionText = `Batay sa teksto, ano ang tumutukoy sa: "${card.definition.slice(0, 90)}..."?`;
-      explanationText = `Tumpak! Ang sagot ay "${card.concept}". Ito ay tinukoy bilang: ${card.definition}`;
-    } else if (lang === 'filipino') {
-      questionText = `Ayon sa talata, ano ang kahulugan ng: "${card.definition.slice(0, 90)}..."?`;
-      explanationText = `Tama! Ang sagot ay "${card.concept}". Ang kahulugan nito ay: ${card.definition}`;
-    } else {
-      questionText = `According to the material, what concept refers to: "${card.definition.slice(0, 90)}..."?`;
-      explanationText = `Correct! The response is "${card.concept}". It is defined as: ${card.definition}`;
+    if (statusText) {
+      statusText.textContent = 'MulatAI is ready for offline study!';
+    }
+    if (engineStatusBadge) {
+      engineStatusBadge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> AI: Ready (WebGPU)`;
+    }
+    if (loaderPanel) {
+      setTimeout(() => {
+        loaderPanel.classList.add('hidden');
+      }, 1000);
     }
 
-    // Shuffle options using the card concepts
-    const options = [card.concept];
-    const otherConcepts = flashcards.filter((_, idx) => idx !== i).map(c => c.concept);
-
-    options.push(otherConcepts[0]);
-    options.push(otherConcepts[1]);
-
-    // Add a distractor option
-    if (lang === 'taglish') {
-      options.push('Lahat ng nabanggit');
-    } else if (lang === 'filipino') {
-      options.push('Wala sa mga pagpipilian');
-    } else {
-      options.push('None of the above');
+    const generateBtn = document.getElementById('generate-btn');
+    if (generateBtn) {
+      generateBtn.disabled = false;
+      generateBtn.classList.remove('bg-slate-200', 'text-slate-400', 'cursor-not-allowed', 'dark:bg-slate-900', 'dark:text-slate-700');
+      generateBtn.classList.add('bg-brand-600', 'text-white', 'hover:bg-brand-700', 'cursor-pointer');
     }
+  } catch (error) {
+    console.error('[MulatAI] WebGPU pipeline failed to load:', error);
+    if (statusText) {
+      statusText.textContent = `Initialization failed: ${error.message}. Make sure WebGPU is enabled in your browser.`;
+    }
+    if (engineStatusBadge) {
+      engineStatusBadge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-rose-500"></span> AI: Error`;
+    }
+    // Highlight the loader panel with a warning color
+    if (loaderPanel) {
+      loaderPanel.classList.add('border-rose-500', 'dark:border-rose-950', 'bg-rose-50/10');
+    }
+  }
+}
 
-    // Shuffle array and track correct index
-    const correctVal = card.concept;
-    const shuffledOptions = options.sort(() => Math.random() - 0.5);
-    const correctIndex = shuffledOptions.indexOf(correctVal);
+// Robust JSON extraction parser
+function extractAndParseJSON(text) {
+  const startIndex = text.indexOf('{');
+  const endIndex = text.lastIndexOf('}');
 
-    quiz.push({
-      question: questionText,
-      options: shuffledOptions,
-      correct_index: correctIndex,
-      explanation: explanationText
+  if (startIndex === -1 || endIndex === -1 || endIndex < startIndex) {
+    throw new Error('No valid JSON block detected in model output.');
+  }
+
+  const jsonString = text.substring(startIndex, endIndex + 1).trim();
+  return JSON.parse(jsonString);
+}
+
+// DOM Rendering: Flashcards View
+export function renderFlashcards(data) {
+  console.log('[MulatAI Render Hook] renderFlashcards called with payload:', data);
+  if (!data || !data.flashcards || !data.flashcards.length) return;
+  
+  currentDeck = data;
+  currentFlashcardIndex = 0;
+  
+  updateFlashcardDOM();
+}
+
+function updateFlashcardDOM() {
+  if (!currentDeck || !currentDeck.flashcards) return;
+  const card = currentDeck.flashcards[currentFlashcardIndex];
+  
+  const conceptText = document.getElementById('card-concept-text');
+  const definitionText = document.getElementById('card-definition-text');
+  const progressText = document.getElementById('flashcard-progress-text');
+  const progressBar = document.getElementById('flashcard-progress-bar');
+  const innerCard = document.getElementById('flashcard-inner');
+
+  // Reset rotation state first when changing cards
+  if (innerCard) {
+    innerCard.classList.remove('rotate-y-180');
+  }
+
+  if (conceptText) conceptText.textContent = card.concept;
+  if (definitionText) definitionText.textContent = card.definition;
+  
+  const total = currentDeck.flashcards.length;
+  if (progressText) {
+    progressText.textContent = `${currentFlashcardIndex + 1} / ${total}`;
+  }
+  
+  if (progressBar) {
+    progressBar.style.width = `${((currentFlashcardIndex + 1) / total) * 100}%`;
+  }
+}
+
+// DOM Rendering: Quiz View
+export function renderQuiz(data) {
+  console.log('[MulatAI Render Hook] renderQuiz called with payload:', data);
+  if (!data || !data.quiz || !data.quiz.length) return;
+  
+  currentDeck = data;
+  currentQuizIndex = 0;
+  quizScore = 0;
+  
+  // Reset visibility
+  const resultsCard = document.getElementById('quiz-results-card');
+  const questionCard = document.getElementById('quiz-question-card');
+  if (resultsCard) resultsCard.classList.add('hidden');
+  if (questionCard) questionCard.classList.remove('hidden');
+
+  updateQuizDOM();
+}
+
+function updateQuizDOM() {
+  if (!currentDeck || !currentDeck.quiz) return;
+  const question = currentDeck.quiz[currentQuizIndex];
+  
+  const questionText = document.getElementById('quiz-question-text');
+  const optionsContainer = document.getElementById('quiz-options-container');
+  const progressText = document.getElementById('quiz-progress-text');
+  const feedbackBox = document.getElementById('quiz-feedback-box');
+  const submitBtn = document.getElementById('quiz-submit-btn');
+
+  if (questionText) questionText.textContent = question.question;
+  if (progressText) {
+    progressText.textContent = `Question ${currentQuizIndex + 1} of ${currentDeck.quiz.length}`;
+  }
+  
+  // Clear and regenerate choice buttons
+  if (optionsContainer) {
+    optionsContainer.innerHTML = '';
+    
+    question.options.forEach((option, index) => {
+      const btn = document.createElement('button');
+      btn.className = 'option-btn text-left text-xs font-semibold p-4 rounded-xl border border-slate-200 hover:bg-slate-50 dark:border-slate-850 dark:hover:bg-slate-900 dark:text-slate-250 transition-all w-full';
+      btn.textContent = option;
+      btn.addEventListener('click', () => handleSelectOption(index, btn));
+      optionsContainer.appendChild(btn);
     });
   }
 
+  // Hide feedback and disable next button initially
+  if (feedbackBox) feedbackBox.classList.add('hidden');
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.classList.add('bg-slate-200', 'text-slate-400', 'cursor-not-allowed');
+    submitBtn.classList.remove('bg-brand-600', 'text-white', 'hover:bg-brand-700', 'cursor-pointer');
+    submitBtn.querySelector('span').textContent = currentQuizIndex === currentDeck.quiz.length - 1 ? 'Show Results / Tingnan ang Resulta' : 'Next Question / Susunod na Tanong';
+  }
+}
+
+function handleSelectOption(selectedIndex, selectedBtn) {
+  if (!currentDeck || !currentDeck.quiz) return;
+  const question = currentDeck.quiz[currentQuizIndex];
+  
+  const optionsContainer = document.getElementById('quiz-options-container');
+  const feedbackBox = document.getElementById('quiz-feedback-box');
+  const feedbackTitle = document.getElementById('quiz-feedback-title');
+  const explanationText = document.getElementById('quiz-explanation-text');
+  const submitBtn = document.getElementById('quiz-submit-btn');
+
+  // Disable all buttons in container so user cannot change answer
+  const buttons = optionsContainer.querySelectorAll('button');
+  buttons.forEach((btn) => {
+    btn.disabled = true;
+  });
+
+  const correctIndex = question.correct_index;
+  const isCorrect = selectedIndex === correctIndex;
+
+  if (isCorrect) {
+    quizScore++;
+    selectedBtn.classList.add('bg-emerald-50', 'border-emerald-500', 'text-emerald-700', 'dark:bg-emerald-950/20', 'dark:text-emerald-400', 'glow-active-green');
+  } else {
+    selectedBtn.classList.add('bg-rose-50', 'border-rose-500', 'text-rose-700', 'dark:bg-rose-950/20', 'dark:text-rose-400', 'glow-active-red');
+    // Highlight correct choice
+    if (buttons[correctIndex]) {
+      buttons[correctIndex].classList.add('bg-emerald-50', 'border-emerald-500', 'text-emerald-700', 'dark:bg-emerald-950/20', 'dark:text-emerald-400');
+    }
+  }
+
+  // Show feedback block
+  if (feedbackBox && explanationText && feedbackTitle) {
+    feedbackBox.classList.remove('hidden');
+    if (isCorrect) {
+      feedbackTitle.textContent = 'Correct Answer / Tama!';
+      feedbackTitle.className = 'font-extrabold text-xs uppercase tracking-wide text-emerald-600 dark:text-emerald-400';
+      feedbackBox.className = 'rounded-xl p-4 border border-emerald-200 bg-emerald-50/20 dark:border-emerald-800/40 dark:bg-emerald-950/10 text-xs leading-relaxed slide-in space-y-1';
+    } else {
+      feedbackTitle.textContent = 'Incorrect / May Mali!';
+      feedbackTitle.className = 'font-extrabold text-xs uppercase tracking-wide text-rose-600 dark:text-rose-400';
+      feedbackBox.className = 'rounded-xl p-4 border border-rose-200 bg-rose-50/20 dark:border-rose-800/40 dark:bg-rose-950/10 text-xs leading-relaxed slide-in space-y-1';
+    }
+    explanationText.textContent = question.explanation;
+  }
+
+  // Enable next button
+  if (submitBtn) {
+    submitBtn.disabled = false;
+    submitBtn.classList.remove('bg-slate-200', 'text-slate-400', 'cursor-not-allowed');
+    submitBtn.classList.add('bg-brand-600', 'text-white', 'hover:bg-brand-700', 'cursor-pointer');
+  }
+}
+
+// Handle Study Deck Generation
+async function handleGenerate() {
+  const sourceTextEl = document.getElementById('source-text') || document.getElementById('text-input');
+  const langSelectEl = document.getElementById('lang-select') || document.getElementById('language-select');
+  const statusText = document.getElementById('status-text');
+  const generateBtn = document.getElementById('generate-btn');
+  const loaderScreen = document.getElementById('generating-loader');
+  const deckSection = document.getElementById('study-deck-section');
+
+  const sourceText = selectedFileContent.trim() || (sourceTextEl ? sourceTextEl.value.trim() : '');
+  if (!sourceText) {
+    alert('Please provide some text or upload a file to analyze.');
+    return;
+  }
+
+  // Map option values to user-friendly language names
+  let targetLanguage = langSelectEl ? langSelectEl.value : 'taglish';
+
+  if (generateBtn) generateBtn.disabled = true;
+  if (statusText) statusText.textContent = 'Generating your study deck using local GPU...';
+  if (loaderScreen) loaderScreen.classList.remove('hidden');
+  if (deckSection) deckSection.classList.add('hidden');
+
+  // Fallback to mock templates if WebGPU is not loaded
+  if (!isModelLoaded) {
+    console.warn('[MulatAI] AI model not loaded. Falling back to offline local template deck generator.');
+    const studyDeck = generateMockDeck(sourceText, targetLanguage);
+    
+    try {
+      currentFilename = currentFilename || 'Pasted Notes';
+      currentMaterialId = await db.materials.add({
+        filename: currentFilename,
+        rawText: sourceText,
+        timestamp: Date.now()
+      });
+
+      await db.flashcards.add({
+        materialId: currentMaterialId,
+        cards: studyDeck.flashcards,
+        timestamp: Date.now()
+      });
+
+      await db.reviewers.add({
+        materialId: currentMaterialId,
+        summaryText: "Reviewer content generated in offline demo mode. Study hard!",
+        timestamp: Date.now()
+      });
+    } catch (dbErr) {
+      console.warn('[MulatAI] Failed to save demo material to database:', dbErr);
+    }
+
+    setTimeout(() => {
+      renderFlashcards(studyDeck);
+      renderQuiz(studyDeck);
+      if (statusText) {
+        statusText.textContent = 'Deck generation completed successfully! (Demo Mode)';
+      }
+      if (generateBtn) generateBtn.disabled = false;
+      if (loaderScreen) loaderScreen.classList.add('hidden');
+      if (deckSection) deckSection.classList.remove('hidden');
+      
+      deckSection.scrollIntoView({ behavior: 'smooth' });
+    }, 1500);
+    return;
+  }
+
+  try {
+    // 1. Save raw material text to IndexedDB
+    const filename = currentFilename || 'Pasted Notes';
+    currentMaterialId = await db.materials.add({
+      filename: filename,
+      rawText: sourceText,
+      timestamp: Date.now()
+    });
+
+    console.log(`[MulatAI] Raw material saved with ID: ${currentMaterialId}`);
+
+    // 2. Generate flashcards using AI Engine
+    if (statusText) statusText.textContent = 'Creating flashcards... / Gumagawa ng flashcards...';
+    const flashcardsData = await generateStudyMaterial(sourceText, 'flashcards', targetLanguage);
+    
+    // 3. Generate quiz using AI Engine
+    if (statusText) statusText.textContent = 'Creating quiz... / Gumagawa ng pagsusulit...';
+    const quizData = await generateStudyMaterial(sourceText, 'quiz', targetLanguage);
+    
+    // 4. Generate reviewer summary using AI Engine
+    if (statusText) statusText.textContent = 'Creating study guide... / Gumagawa ng reviewer...';
+    let reviewerData = { reviewer: '' };
+    try {
+      reviewerData = await generateStudyMaterial(sourceText, 'reviewer', targetLanguage);
+    } catch (e) {
+      console.warn("Failed to generate reviewer, proceeding without it:", e);
+    }
+
+    const studyDeck = {
+      flashcards: flashcardsData.flashcards || [],
+      quiz: quizData.quiz || []
+    };
+
+    // Save generated structures to database
+    await db.flashcards.add({
+      materialId: currentMaterialId,
+      cards: studyDeck.flashcards,
+      timestamp: Date.now()
+    });
+
+    if (reviewerData.reviewer) {
+      await db.reviewers.add({
+        materialId: currentMaterialId,
+        summaryText: reviewerData.reviewer,
+        timestamp: Date.now()
+      });
+    }
+
+    renderFlashcards(studyDeck);
+    renderQuiz(studyDeck);
+
+    if (statusText) {
+      statusText.textContent = 'Deck generation completed successfully!';
+    }
+    if (deckSection) deckSection.classList.remove('hidden');
+    
+    deckSection.scrollIntoView({ behavior: 'smooth' });
+  } catch (error) {
+    console.error('[MulatAI] Generation error:', error);
+    if (statusText) {
+      statusText.textContent = `Generation failed: ${error.message}. Falling back to demo mode.`;
+    }
+    // Safe fallback to mock templates
+    const studyDeck = generateMockDeck(sourceText, targetLanguage);
+    renderFlashcards(studyDeck);
+    renderQuiz(studyDeck);
+    if (deckSection) deckSection.classList.remove('hidden');
+    deckSection.scrollIntoView({ behavior: 'smooth' });
+  } finally {
+    if (generateBtn) generateBtn.disabled = false;
+    if (loaderScreen) loaderScreen.classList.add('hidden');
+  }
+}
+
+// Generate high-fidelity offline sample study deck (educational fallback)
+function generateMockDeck(text, language) {
+  const lowercaseText = text.toLowerCase();
+  let flashcards = [];
+  let quiz = [];
+  
+  if (lowercaseText.includes('photo') || lowercaseText.includes('halaman') || lowercaseText.includes('light') || lowercaseText.includes('sun')) {
+    if (language === 'Taglish' || language === 'Filipino') {
+      flashcards = [
+        {
+          concept: 'Photosynthesis',
+          definition: 'Ang proseso kung saan ang plants ay gumagamit ng sunlight upang i-convert ang water at carbon dioxide into glucose (food) at oxygen. Parang kitchen ng halaman!'
+        },
+        {
+          concept: 'Chlorophyll',
+          definition: 'Ang green pigment na matatagpuan sa chloroplasts na sumisipsip ng light energy. Ito ang dahilan kung bakit green ang dahon!'
+        },
+        {
+          concept: 'Glucose',
+          definition: 'Isang simpleng asukal (chemical energy) na ginagawa ng halaman para sa kanilang paglaki at enerhiya. Ito ang kanilang end-product!'
+        }
+      ];
+      quiz = [
+        {
+          question: 'Ano ang pangunahing enerhiya na ginagamit sa photosynthesis?',
+          options: ['Sunlight / Sikat ng araw', 'Water / Tubig', 'Oxygen', 'Glucose'],
+          correct_index: 0,
+          explanation: 'Sunlight ang nagbibigay ng enerhiya upang simulan ang chemical reaction sa chloroplasts ng mga halaman.'
+        },
+        {
+          question: 'Saan matatagpuan ang green pigment na chlorophyll?',
+          options: ['Chloroplasts', 'Mitochondria', 'Nucleus', 'Cell Wall'],
+          correct_index: 0,
+          explanation: 'Ang chlorophyll ay nakalagay sa loob ng chloroplasts ng halaman kung saan nagaganap ang photosynthesis.'
+        },
+        {
+          question: 'Ano ang mahalagang gas na inilalabas ng halaman na ginagamit natin sa paghinga?',
+          options: ['Carbon Dioxide', 'Nitrogen', 'Oxygen', 'Hydrogen'],
+          correct_index: 2,
+          explanation: 'Ang oxygen (O2) ay ang byproduct ng photosynthesis na napakahalaga para sa respiration ng mga tao at hayop.'
+        }
+      ];
+    } else {
+      flashcards = [
+        {
+          concept: 'Photosynthesis',
+          definition: 'The process by which plants, algae, and some bacteria use sunlight, water, and carbon dioxide to produce glucose and oxygen.'
+        },
+        {
+          concept: 'Chlorophyll',
+          definition: 'The green pigment inside chloroplasts that absorbs light energy to drive the chemical reaction of photosynthesis.'
+        },
+        {
+          concept: 'Glucose',
+          definition: 'A simple sugar produced by plants that serves as their primary source of chemical energy and structural growth.'
+        }
+      ];
+      quiz = [
+        {
+          question: 'What is the primary energy source for photosynthesis?',
+          options: ['Sunlight', 'Water', 'Oxygen', 'Glucose'],
+          correct_index: 0,
+          explanation: 'Sunlight provides the initial energy required to split water molecules and drive the chemical synthesis.'
+        },
+        {
+          question: 'Where is the chlorophyll pigment located in plant cells?',
+          options: ['Chloroplasts', 'Mitochondria', 'Nucleus', 'Cell Wall'],
+          correct_index: 0,
+          explanation: 'Chlorophyll is contained inside the chloroplasts, which act as the photosynthetic centers of the cell.'
+        },
+        {
+          question: 'Which gas is released as a byproduct of photosynthesis?',
+          options: ['Carbon Dioxide', 'Nitrogen', 'Oxygen', 'Hydrogen'],
+          correct_index: 2,
+          explanation: 'Oxygen (O2) is released into the atmosphere as water molecules are split during the light-dependent reactions.'
+        }
+      ];
+    }
+  } else {
+    if (language === 'Taglish' || language === 'Filipino') {
+      flashcards = [
+        {
+          concept: 'Active Recall',
+          definition: 'Isang learning technique kung saan sinusubukan mong alalahanin ang impormasyon mula sa iyong memorya sa halip na basahin lang ito ulit. Sobrang epektibo sa exam!'
+        },
+        {
+          concept: 'Spaced Repetition',
+          definition: 'Ang pag-review ng lessons sa tumataas na intervals (e.g., 1 day, 3 days, 1 week) upang labanan ang forgetting curve. Mas tumatagal ang retention sa utak!'
+        },
+        {
+          concept: 'Feynman Technique',
+          definition: 'Isang paraan ng pag-aaral kung saan ipinapaliwanag mo ang isang komplikadong paksa gamit ang simpleng salita na parang nagtuturo sa isang bata. Kapag may part na mahirap ipaliwanag, doon ka may gap.'
+        }
+      ];
+      quiz = [
+        {
+          question: 'Alin sa mga sumusunod ang pinakamainam na paraan upang labanan ang Forgetting Curve?',
+          options: ['Muling pagbasa ng notes nang sunod-sunod', 'Spaced Repetition / Paulit-ulit na review sa tamang pagitan', 'Pagsasaulo ng buong textbook sa isang gabi', 'Pagkakaroon ng mahabang tulog bago ang klase'],
+          correct_index: 1,
+          explanation: 'Ang Spaced Repetition ay scientifically proven na nagpapalakas ng neural connections sa pamamagitan ng pag-recall ng impormasyon bago ito tuluyang malimutan.'
+        },
+        {
+          question: 'Ano ang tawag sa proseso ng pag-aaral kung saan ipinapaliwanag mo ang paksa sa pinakasimpleng paraan?',
+          options: ['Feynman Technique', 'Pomodoro Method', 'Active Recall', 'Mind Mapping'],
+          correct_index: 0,
+          explanation: 'Ang Feynman Technique ay nakapokus sa pagpapasimpleng paliwanag upang matukoy ang mga gaps o kulang sa iyong sariling pag-unawa.'
+        },
+        {
+          question: 'Bakit mas epektibo ang Active Recall kumpara sa Passive Review (tulad ng re-reading)?',
+          options: ['Dahil mas mabilis itong gawin', 'Dahil pinipilit nitong gumana ang utak sa pag-retrieve ng memorya', 'Dahil hindi nito kailangan ng konsentrasyon', 'Dahil mas nakakabawas ito ng stress'],
+          correct_index: 1,
+          explanation: 'Ang pagpilit sa utak na mag-retrieve ng impormasyon ay lumilikha ng mas matibay na memory pathways kaysa sa basta lamang pagtanggap ng impormasyon.'
+        }
+      ];
+    } else {
+      flashcards = [
+        {
+          concept: 'Active Recall',
+          definition: 'A learning principle that involves testing your memory by trying to retrieve information without looking at your notes, strengthening neural pathways.'
+        },
+        {
+          concept: 'Spaced Repetition',
+          definition: 'A learning technique where reviews are spaced out over increasing intervals of time to exploit the psychological spacing effect and improve long-term retention.'
+        },
+        {
+          concept: 'Feynman Technique',
+          definition: 'A method of learning where you explain a complex concept in simple terms, as if teaching a child, to identify gaps in your own understanding.'
+        }
+      ];
+      quiz = [
+        {
+          question: 'Which method is scientifically proven to combat the Forgetting Curve?',
+          options: ['Continuous passive reading', 'Spaced Repetition over increasing intervals', 'Cramming the night before an exam', 'Highlighting key terms in a textbook'],
+          correct_index: 1,
+          explanation: 'Spaced Repetition strengthens memory retention by prompting recall just as the information is about to be forgotten.'
+        },
+        {
+          question: 'What is the primary goal of the Feynman Technique?',
+          options: ['To memorize definitions word-for-word', 'To identify gaps in understanding by explaining concepts simply', 'To study for long hours without getting tired', 'To organize study notes using color codes'],
+          correct_index: 1,
+          explanation: 'By trying to explain a concept simply, you quickly discover areas where your understanding is weak or incomplete.'
+        },
+        {
+          question: 'Why is Active Recall superior to Passive Re-reading?',
+          options: ['It takes less time and effort', 'It forces the brain to retrieve information, strengthening neural connections', 'It does not require active focus', 'It reduces the need for sleep'],
+          correct_index: 1,
+          explanation: 'Retrieving information from memory actively builds stronger memory pathways than simply looking at information repeatedly.'
+        }
+      ];
+    }
+  }
+  
   return { flashcards, quiz };
 }
+
+// Setup Wizard Transitions and inputs
+function setupWizardTransitions() {
+  const step1 = document.getElementById('wizard-step-1');
+  const step2 = document.getElementById('wizard-step-2');
+  const backBtn = document.getElementById('wizard-back-btn');
+  const progressFill = document.getElementById('wizard-progress-fill');
+  const step2Title = document.getElementById('wizard-step-2-title');
+  const generateBtn = document.getElementById('generate-btn');
+
+  // Option rows click events
+  Object.entries(optionConfigs).forEach(([id, config]) => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.addEventListener('click', () => {
+        // Hide step 1, show step 2
+        if (step1) step1.classList.add('hidden');
+        if (step2) step2.classList.remove('hidden');
+        
+        // Update title and progress bar
+        if (step2Title) step2Title.textContent = config.title;
+        if (progressFill) progressFill.style.width = config.progress;
+        
+        // Show back button
+        if (backBtn) {
+          backBtn.style.opacity = '1';
+          backBtn.style.pointerEvents = 'auto';
+        }
+        
+        // Show corresponding input group and hide others
+        const inputGroups = [
+          'input-group-file',
+          'input-group-notes',
+          'input-group-youtube',
+          'input-group-photo',
+          'input-group-web'
+        ];
+        
+        inputGroups.forEach((groupName) => {
+          const groupEl = document.getElementById(groupName);
+          if (groupEl) {
+            if (groupName === config.group) {
+              groupEl.classList.remove('hidden');
+            } else {
+              groupEl.classList.add('hidden');
+            }
+          }
+        });
+      });
+    }
+  });
+
+  // Back button click event
+  if (backBtn) {
+    backBtn.addEventListener('click', () => {
+      // Show step 1, hide step 2
+      if (step1) step1.classList.remove('hidden');
+      if (step2) step2.classList.add('hidden');
+      
+      // Reset back button and progress
+      backBtn.style.opacity = '0';
+      backBtn.style.pointerEvents = 'none';
+      if (progressFill) progressFill.style.width = '20%';
+      
+      // Hide all input groups
+      const inputGroups = [
+        'input-group-file',
+        'input-group-notes',
+        'input-group-youtube',
+        'input-group-photo',
+        'input-group-web'
+      ];
+      inputGroups.forEach((groupName) => {
+        const groupEl = document.getElementById(groupName);
+        if (groupEl) groupEl.classList.add('hidden');
+      });
+      
+      // Clear selected content and reset button state
+      selectedFileContent = '';
+      if (generateBtn) {
+        generateBtn.disabled = true;
+        generateBtn.classList.add('bg-slate-200', 'text-slate-400', 'cursor-not-allowed', 'dark:bg-slate-900', 'dark:text-slate-700');
+        generateBtn.classList.remove('bg-brand-600', 'text-white', 'hover:bg-brand-700', 'cursor-pointer');
+      }
+    });
+  }
+
+  // Setup "Show More" Collapsible website link option
+  const showMoreToggle = document.getElementById('show-more-toggle-btn');
+  const showMorePanel = document.getElementById('show-more-panel');
+  const showMoreIcon = document.getElementById('show-more-icon');
+  if (showMoreToggle && showMorePanel) {
+    showMoreToggle.addEventListener('click', () => {
+      const isExpanded = showMorePanel.style.maxHeight && showMorePanel.style.maxHeight !== '0px';
+      if (isExpanded) {
+        showMorePanel.style.maxHeight = '0px';
+        if (showMoreIcon) showMoreIcon.style.transform = 'rotate(0deg)';
+        showMoreToggle.querySelector('span').textContent = 'Show more';
+      } else {
+        showMorePanel.style.maxHeight = '100px';
+        if (showMoreIcon) showMoreIcon.style.transform = 'rotate(180deg)';
+        showMoreToggle.querySelector('span').textContent = 'Show less';
+      }
+    });
+  }
+
+  // Setup "I don't have anything" (Demo Mode) button
+  const demoBtn = document.getElementById('btn-demo-no-material');
+  if (demoBtn) {
+    demoBtn.addEventListener('click', () => {
+      const optNotes = document.getElementById('opt-notes');
+      if (optNotes) {
+        optNotes.click();
+        
+        const textInput = document.getElementById('text-input');
+        if (textInput) {
+          textInput.value = "Ang photosynthesis ay ang proseso kung saan ang mga halaman, algae, at ilang uri ng bakterya ay gumagawa ng kanilang sariling pagkain gamit ang sikat ng araw, tubig (H2O), at carbon dioxide (CO2). Sa prosesong ito, ang chlorophyll na matatagpuan sa chloroplasts ng halaman ay sumisipsip ng liwanag. Ang enerhiyang ito ay ginagamit upang paghiwalayin ang tubig at carbon dioxide, na nagreresulta sa pagbuo ng glucose (isang uri ng asukal na nagsisilbing pagkain ng halaman) at oxygen (O2) na inilalabas sa hangin. Ang oxygen na ito ang ating nilalanghap upang mabuhay, habang ang glucose naman ay ginagamit ng halaman para sa enerhiya at paglaki. Sa madaling salita, ang mga halaman ay parang maliliit na kusina ng kalikasan na nagpapakain sa buong mundo!";
+          
+          const event = new Event('input', { bubbles: true });
+          textInput.dispatchEvent(event);
+        }
+      }
+    });
+  }
+}
+
+// Setup User Inputs Handling
+function setupInputHandlers() {
+  const generateBtn = document.getElementById('generate-btn');
+
+  // A. File Input handling
+  const fileInput = document.getElementById('file-input');
+  const dropzone = document.getElementById('dropzone');
+  const fileInfo = document.getElementById('file-info');
+  const fileName = document.getElementById('file-name');
+  const fileSize = document.getElementById('file-size');
+  const removeFileBtn = document.getElementById('remove-file-btn');
+
+  const handleFileSelect = async (file) => {
+    if (!file) return;
+    
+    if (fileName) fileName.textContent = file.name;
+    if (fileSize) fileSize.textContent = `${(file.size / (1024 * 1024)).toFixed(2)} MB`;
+    
+    if (dropzone) dropzone.classList.add('hidden');
+    if (fileInfo) fileInfo.classList.remove('hidden');
+    
+    if (generateBtn) {
+      generateBtn.disabled = true;
+      generateBtn.classList.add('bg-slate-200', 'text-slate-400', 'cursor-not-allowed', 'dark:bg-slate-900', 'dark:text-slate-700');
+      generateBtn.classList.remove('bg-brand-600', 'text-white', 'hover:bg-brand-700', 'cursor-pointer');
+    }
+    
+    const dropzoneTextEl = document.getElementById('dropzone-text');
+    const originalDropText = dropzoneTextEl ? dropzoneTextEl.textContent : '';
+    if (dropzoneTextEl) {
+      dropzoneTextEl.textContent = 'Extracting document text... / Kumukuha ng teksto...';
+    }
+
+    try {
+      currentFilename = file.name;
+      if (file.type === 'text/plain' || file.name.endsWith('.txt')) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          selectedFileContent = e.target.result;
+          finishExtraction();
+        };
+        reader.readAsText(file);
+      } else if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
+        selectedFileContent = await extractTextFromPDF(file);
+        finishExtraction();
+      } else {
+        // Safe mock text for PPT/PPTX since standard client-side parsing of ppt is not supported by PDF.js/Tesseract
+        selectedFileContent = `PowerPoint Document: ${file.name}. This is an offline fallback containing slides on biology, cells, respiration, and cellular division. Mitochondria are double membrane-bound organelles found in most eukaryotic organisms. They generate most of the cell's supply of adenosine triphosphate (ATP), used as a source of chemical energy.`;
+        finishExtraction();
+      }
+    } catch (err) {
+      console.error('[MulatAI] File extraction failed:', err);
+      alert('Failed to extract text from this file. Ensure it is a valid text or PDF file.');
+      if (dropzoneTextEl) dropzoneTextEl.textContent = originalDropText;
+    }
+
+    function finishExtraction() {
+      if (dropzoneTextEl) dropzoneTextEl.textContent = originalDropText;
+      
+      if (!selectedFileContent || selectedFileContent.trim() === '') {
+        alert('Warning: No text could be extracted from this PDF. It might be scanned or image-only. We will enable generation, but note that the AI might use fallback mock cards.');
+        selectedFileContent = 'Scanned PDF fallback: photosynthesis chloroplast cell respiration mitochondria glucose energy ATP active transport.';
+      }
+
+      if (generateBtn && selectedFileContent) {
+        generateBtn.disabled = false;
+        generateBtn.classList.remove('bg-slate-200', 'text-slate-400', 'cursor-not-allowed', 'dark:bg-slate-900', 'dark:text-slate-700');
+        generateBtn.classList.add('bg-brand-600', 'text-white', 'hover:bg-brand-700', 'cursor-pointer');
+      }
+    }
+  };
+
+  if (dropzone && fileInput) {
+    dropzone.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', (e) => handleFileSelect(e.target.files[0]));
+    
+    dropzone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropzone.classList.add('border-[var(--accent-fg)]');
+    });
+    
+    dropzone.addEventListener('dragleave', () => {
+      dropzone.classList.remove('border-[var(--accent-fg)]');
+    });
+    
+    dropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('border-[var(--accent-fg)]');
+      handleFileSelect(e.dataTransfer.files[0]);
+    });
+  }
+
+  if (removeFileBtn) {
+    removeFileBtn.addEventListener('click', () => {
+      if (fileInput) fileInput.value = '';
+      selectedFileContent = '';
+      if (dropzone) dropzone.classList.remove('hidden');
+      if (fileInfo) fileInfo.classList.add('hidden');
+      if (generateBtn) {
+        generateBtn.disabled = true;
+        generateBtn.classList.add('bg-slate-200', 'text-slate-400', 'cursor-not-allowed', 'dark:bg-slate-900', 'dark:text-slate-700');
+        generateBtn.classList.remove('bg-brand-600', 'text-white', 'hover:bg-brand-700', 'cursor-pointer');
+      }
+    });
+  }
+
+  // B. Paste Notes Textarea Input Handling
+  const textInput = document.getElementById('text-input');
+  const charCounter = document.getElementById('char-counter');
+
+  if (textInput) {
+    textInput.addEventListener('input', (e) => {
+      const text = e.target.value;
+      if (charCounter) {
+        charCounter.textContent = `${text.length} character${text.length === 1 ? '' : 's'}`;
+      }
+      
+      if (text.trim().length > 5) {
+        if (generateBtn) {
+          generateBtn.disabled = false;
+          generateBtn.classList.remove('bg-slate-200', 'text-slate-400', 'cursor-not-allowed', 'dark:bg-slate-900', 'dark:text-slate-700');
+          generateBtn.classList.add('bg-brand-600', 'text-white', 'hover:bg-brand-700', 'cursor-pointer');
+        }
+        selectedFileContent = text;
+        currentFilename = 'Pasted Notes';
+      } else {
+        if (generateBtn) {
+          generateBtn.disabled = true;
+          generateBtn.classList.add('bg-slate-200', 'text-slate-400', 'cursor-not-allowed', 'dark:bg-slate-900', 'dark:text-slate-700');
+          generateBtn.classList.remove('bg-brand-600', 'text-white', 'hover:bg-brand-700', 'cursor-pointer');
+        }
+        selectedFileContent = '';
+      }
+    });
+  }
+
+  // C. Photograph Notes (Image selection) handling
+  const photoInput = document.getElementById('photo-file-input');
+  const photoDropzone = document.getElementById('photo-dropzone');
+  const photoInfo = document.getElementById('photo-info');
+  const photoFileName = document.getElementById('photo-file-name');
+  const photoFileSize = document.getElementById('photo-file-size');
+  const removePhotoBtn = document.getElementById('remove-photo-btn');
+
+  const handlePhotoSelect = async (file) => {
+    if (!file) return;
+    if (photoFileName) photoFileName.textContent = file.name;
+    if (photoFileSize) photoFileSize.textContent = `${(file.size / (1024 * 1024)).toFixed(2)} MB`;
+    
+    if (photoDropzone) photoDropzone.classList.add('hidden');
+    if (photoInfo) photoInfo.classList.remove('hidden');
+    
+    if (generateBtn) {
+      generateBtn.disabled = true;
+      generateBtn.classList.add('bg-slate-200', 'text-slate-400', 'cursor-not-allowed', 'dark:bg-slate-900', 'dark:text-slate-700');
+      generateBtn.classList.remove('bg-brand-600', 'text-white', 'hover:bg-brand-700', 'cursor-pointer');
+    }
+
+    const photoDropzoneTextEl = document.getElementById('photo-dropzone-text');
+    const originalPhotoText = photoDropzoneTextEl ? photoDropzoneTextEl.textContent : '';
+    if (photoDropzoneTextEl) {
+      photoDropzoneTextEl.textContent = 'Running OCR on image... / Kinukuha ang teksto...';
+    }
+    
+    try {
+      currentFilename = file.name;
+      selectedFileContent = await extractTextFromImage(file);
+      
+      if (photoDropzoneTextEl) photoDropzoneTextEl.textContent = originalPhotoText;
+      
+      if (generateBtn && selectedFileContent) {
+        generateBtn.disabled = false;
+        generateBtn.classList.remove('bg-slate-200', 'text-slate-400', 'cursor-not-allowed', 'dark:bg-slate-900', 'dark:text-slate-700');
+        generateBtn.classList.add('bg-brand-600', 'text-white', 'hover:bg-brand-700', 'cursor-pointer');
+      }
+    } catch (err) {
+      console.error('[MulatAI] OCR processing failed:', err);
+      alert('Failed to run OCR on image. Make sure the file is a valid image format.');
+      if (photoDropzoneTextEl) photoDropzoneTextEl.textContent = originalPhotoText;
+    }
+  };
+
+  if (photoDropzone && photoInput) {
+    photoDropzone.addEventListener('click', () => photoInput.click());
+    photoInput.addEventListener('change', (e) => handlePhotoSelect(e.target.files[0]));
+    
+    photoDropzone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      photoDropzone.classList.add('border-[var(--accent-fg)]');
+    });
+    
+    photoDropzone.addEventListener('dragleave', () => {
+      photoDropzone.classList.remove('border-[var(--accent-fg)]');
+    });
+    
+    photoDropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      photoDropzone.classList.remove('border-[var(--accent-fg)]');
+      handlePhotoSelect(e.dataTransfer.files[0]);
+    });
+  }
+
+  if (removePhotoBtn) {
+    removePhotoBtn.addEventListener('click', () => {
+      if (photoInput) photoInput.value = '';
+      selectedFileContent = '';
+      if (photoDropzone) photoDropzone.classList.remove('hidden');
+      if (photoInfo) photoInfo.classList.add('hidden');
+      if (generateBtn) {
+        generateBtn.disabled = true;
+        generateBtn.classList.add('bg-slate-200', 'text-slate-400', 'cursor-not-allowed', 'dark:bg-slate-900', 'dark:text-slate-700');
+        generateBtn.classList.remove('bg-brand-600', 'text-white', 'hover:bg-brand-700', 'cursor-pointer');
+      }
+    });
+  }
+
+  // D. YouTube / Website URLs Inputs
+  const youtubeUrlInput = document.getElementById('youtube-url-input');
+  const webUrlInput = document.getElementById('web-url-input');
+
+  const handleUrlInput = async (e, type) => {
+    const url = e.target.value.trim();
+    if (url.startsWith('http://') || url.startsWith('https://') || url.includes('.')) {
+      if (generateBtn) {
+        generateBtn.disabled = true;
+        generateBtn.classList.add('bg-slate-200', 'text-slate-400', 'cursor-not-allowed', 'dark:bg-slate-900', 'dark:text-slate-700');
+        generateBtn.classList.remove('bg-brand-600', 'text-white', 'hover:bg-brand-700', 'cursor-pointer');
+      }
+      
+      const statusText = document.getElementById('status-text');
+      const engineStatusBadge = document.getElementById('engine-status-badge');
+      const originalBadgeHtml = engineStatusBadge ? engineStatusBadge.innerHTML : '';
+      if (engineStatusBadge) {
+        engineStatusBadge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse"></span> Fetching URL...`;
+      }
+      if (statusText) statusText.textContent = 'Reading URL contents... / Kumukuha ng teksto mula sa link...';
+
+      try {
+        currentFilename = url;
+        if (type === 'web') {
+          selectedFileContent = await fetchAndExtractWebsite(url);
+        } else {
+          selectedFileContent = await fetchAndExtractYouTube(url);
+        }
+
+        if (statusText) statusText.textContent = 'Link content loaded successfully! / Matagumpay na nakuha ang teksto!';
+        if (engineStatusBadge && originalBadgeHtml) engineStatusBadge.innerHTML = originalBadgeHtml;
+
+        if (generateBtn && selectedFileContent) {
+          generateBtn.disabled = false;
+          generateBtn.classList.remove('bg-slate-200', 'text-slate-400', 'cursor-not-allowed', 'dark:bg-slate-900', 'dark:text-slate-700');
+          generateBtn.classList.add('bg-brand-600', 'text-white', 'hover:bg-brand-700', 'cursor-pointer');
+        }
+      } catch (err) {
+        console.error('[MulatAI] URL extraction failed:', err);
+        if (statusText) statusText.textContent = 'Failed to load URL contents.';
+        if (engineStatusBadge && originalBadgeHtml) engineStatusBadge.innerHTML = originalBadgeHtml;
+      }
+    } else {
+      if (generateBtn) {
+        generateBtn.disabled = true;
+        generateBtn.classList.add('bg-slate-200', 'text-slate-400', 'cursor-not-allowed', 'dark:bg-slate-900', 'dark:text-slate-700');
+        generateBtn.classList.remove('bg-brand-600', 'text-white', 'hover:bg-brand-700', 'cursor-pointer');
+      }
+      selectedFileContent = '';
+    }
+  };
+
+  if (youtubeUrlInput) youtubeUrlInput.addEventListener('input', (e) => handleUrlInput(e, 'youtube'));
+  if (webUrlInput) webUrlInput.addEventListener('input', (e) => handleUrlInput(e, 'web'));
+}
+
+// Setup Study Set Navigation & Interactive Events
+function setupDeckInteractions() {
+  // Flashcard flipping
+  const flashcardContainer = document.getElementById('flashcard-container');
+  if (flashcardContainer) {
+    flashcardContainer.addEventListener('click', () => {
+      const innerCard = document.getElementById('flashcard-inner');
+      if (innerCard) {
+        innerCard.classList.toggle('rotate-y-180');
+      }
+    });
+  }
+
+  // Flashcards next/prev controls
+  const prevCardBtn = document.getElementById('prev-card-btn');
+  const nextCardBtn = document.getElementById('next-card-btn');
+
+  if (prevCardBtn) {
+    prevCardBtn.addEventListener('click', (e) => {
+      e.stopPropagation(); // prevent flipping card when clicking control button
+      if (!currentDeck || !currentDeck.flashcards) return;
+      currentFlashcardIndex = (currentFlashcardIndex - 1 + currentDeck.flashcards.length) % currentDeck.flashcards.length;
+      updateFlashcardDOM();
+    });
+  }
+
+  if (nextCardBtn) {
+    nextCardBtn.addEventListener('click', (e) => {
+      e.stopPropagation(); // prevent flipping card when clicking control button
+      if (!currentDeck || !currentDeck.flashcards) return;
+      currentFlashcardIndex = (currentFlashcardIndex + 1) % currentDeck.flashcards.length;
+      updateFlashcardDOM();
+    });
+  }
+
+  // Quiz next/submit button
+  const quizSubmitBtn = document.getElementById('quiz-submit-btn');
+  if (quizSubmitBtn) {
+    quizSubmitBtn.addEventListener('click', () => {
+      if (!currentDeck || !currentDeck.quiz) return;
+      
+      if (currentQuizIndex < currentDeck.quiz.length - 1) {
+        currentQuizIndex++;
+        updateQuizDOM();
+      } else {
+        // Show results
+        const questionCard = document.getElementById('quiz-question-card');
+        const resultsCard = document.getElementById('quiz-results-card');
+        const finalScore = document.getElementById('quiz-final-score');
+        const percentageText = document.getElementById('quiz-percentage-text');
+        
+        if (questionCard) questionCard.classList.add('hidden');
+        if (resultsCard) resultsCard.classList.remove('hidden');
+        
+        if (finalScore) {
+          finalScore.textContent = `${quizScore} / ${currentDeck.quiz.length}`;
+        }
+        if (percentageText) {
+          const pct = Math.round((quizScore / currentDeck.quiz.length) * 100);
+          percentageText.textContent = `${pct}% Score`;
+        }
+
+        // Save attempt to IndexedDB locally
+        if (currentMaterialId) {
+          db.quiz_attempts.add({
+            materialId: currentMaterialId,
+            score: quizScore,
+            totalQuestions: currentDeck.quiz.length,
+            timestamp: Date.now()
+          }).then((id) => {
+            console.log(`[MulatAI] Quiz attempt logged locally with ID: ${id}`);
+          }).catch((err) => {
+            console.warn('[MulatAI] Failed to save quiz attempt:', err);
+          });
+        }
+      }
+    });
+  }
+
+  // Quiz results buttons
+  const quizRestartBtn = document.getElementById('quiz-restart-btn');
+  const quizNewBtn = document.getElementById('quiz-new-btn');
+
+  if (quizRestartBtn) {
+    quizRestartBtn.addEventListener('click', () => {
+      if (currentDeck) {
+        renderQuiz(currentDeck);
+      }
+    });
+  }
+
+  if (quizNewBtn) {
+    quizNewBtn.addEventListener('click', () => {
+      const deckSection = document.getElementById('study-deck-section');
+      const wizardContainer = document.getElementById('wizard-container');
+      
+      if (deckSection) deckSection.classList.add('hidden');
+      if (wizardContainer) {
+        wizardContainer.classList.remove('hidden');
+        
+        // Reset wizard back to step 1
+        const step1 = document.getElementById('wizard-step-1');
+        const step2 = document.getElementById('wizard-step-2');
+        const backBtn = document.getElementById('wizard-back-btn');
+        const progressFill = document.getElementById('wizard-progress-fill');
+        
+        if (step1) step1.classList.remove('hidden');
+        if (step2) step2.classList.add('hidden');
+        if (backBtn) {
+          backBtn.style.opacity = '0';
+          backBtn.style.pointerEvents = 'none';
+        }
+        if (progressFill) progressFill.style.width = '20%';
+      }
+    });
+  }
+
+  // Tab switcher
+  const tabFlashcardsBtn = document.getElementById('tab-flashcards-btn');
+  const tabQuizBtn = document.getElementById('tab-quiz-btn');
+  const tabFlashcardsView = document.getElementById('tab-flashcards-view');
+  const tabQuizView = document.getElementById('tab-quiz-view');
+
+  if (tabFlashcardsBtn && tabQuizBtn) {
+    tabFlashcardsBtn.addEventListener('click', () => {
+      if (tabFlashcardsView) tabFlashcardsView.classList.remove('hidden');
+      if (tabQuizView) tabQuizView.classList.add('hidden');
+      
+      tabFlashcardsBtn.className = 'border-b-2 border-brand-600 text-brand-600 px-1 py-3 text-xs font-bold tracking-wide uppercase dark:border-brand-400 dark:text-brand-400 flex items-center gap-2';
+      tabQuizBtn.className = 'border-b-2 border-transparent text-slate-400 hover:text-slate-600 px-1 py-3 text-xs font-bold tracking-wide uppercase dark:hover:text-slate-300 flex items-center gap-2';
+    });
+
+    tabQuizBtn.addEventListener('click', () => {
+      if (tabFlashcardsView) tabFlashcardsView.classList.add('hidden');
+      if (tabQuizView) tabQuizView.classList.remove('hidden');
+      
+      tabQuizBtn.className = 'border-b-2 border-brand-600 text-brand-600 px-1 py-3 text-xs font-bold tracking-wide uppercase dark:border-brand-400 dark:text-brand-400 flex items-center gap-2';
+      tabFlashcardsBtn.className = 'border-b-2 border-transparent text-slate-400 hover:text-slate-600 px-1 py-3 text-xs font-bold tracking-wide uppercase dark:hover:text-slate-300 flex items-center gap-2';
+    });
+  }
+}
+
+// Light & Dark Mode Toggle Handler
+const setupDarkMode = () => {
+  const darkModeBtn = document.getElementById('dark-mode-btn');
+  const sunIcon = document.getElementById('sun-icon');
+  const moonIcon = document.getElementById('moon-icon');
+
+  if (darkModeBtn) {
+    darkModeBtn.addEventListener('click', () => {
+      const isDark = document.documentElement.classList.toggle('dark');
+      localStorage.setItem('theme', isDark ? 'dark' : 'light');
+      
+      if (isDark) {
+        if (sunIcon) sunIcon.classList.remove('hidden');
+        if (moonIcon) moonIcon.classList.add('hidden');
+      } else {
+        if (sunIcon) sunIcon.classList.add('hidden');
+        if (moonIcon) moonIcon.classList.remove('hidden');
+      }
+    });
+  }
+};
+
+// Attach event listeners and bootstrap
+function setupEventListeners() {
+  const generateBtn = document.getElementById('generate-btn');
+  if (generateBtn) {
+    generateBtn.addEventListener('click', handleGenerate);
+  }
+  
+  setupWizardTransitions();
+  setupInputHandlers();
+  setupDeckInteractions();
+  setupDarkMode();
+}
+
+// Register Service Worker and clean up conflicting workers (common on localhost/port 5500)
+async function registerServiceWorker() {
+  if ('serviceWorker' in navigator) {
+    try {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      for (const reg of registrations) {
+        if (reg.active && !reg.active.scriptURL.includes('sw.js')) {
+          console.log('[MulatAI] Cleared conflicting service worker from another project:', reg.active.scriptURL);
+          await reg.unregister();
+        }
+      }
+      const newReg = await navigator.serviceWorker.register('./sw.js');
+      console.log('[MulatAI] Service Worker registered with scope:', newReg.scope);
+    } catch (error) {
+      console.warn('[MulatAI] Service Worker registration failed:', error);
+    }
+  }
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  initPipeline();
+  setupEventListeners();
+  registerServiceWorker();
+});

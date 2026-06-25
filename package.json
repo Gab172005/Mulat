@@ -1,0 +1,20 @@
+{
+  "name": "mulat-ai",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 5173",
+    "build": "vite build",
+    "preview": "vite preview",
+    "start": "vite",
+    "serve": "live-server --port=5500"
+  },
+  "devDependencies": {
+    "live-server": "^1.2.2",
+    "vite": "^5.2.11"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^3.3.3"
+  }
+}

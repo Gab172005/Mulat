@@ -1,30 +1,37 @@
 /*
-  GabayAI - Service Worker
+  MulatAI - Service Worker
   Provides complete offline capabilities using a Stale-While-Revalidate strategy.
 */
 
-const CACHE_NAME = 'gabayai-cache-v1';
+const CACHE_NAME = 'mulatai-cache-v1';
 
-// Static assets and CDN dependencies to cache immediately on installation
+// Only cache LOCAL static assets on install.
+// External CDN URLs (Tailwind, Google Fonts, HuggingFace) cannot be reliably
+// pre-cached due to CORS / opaque-response restrictions — they cause the install
+// event to throw and break the whole service worker registration.
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
   '/styles.css',
   '/app.js',
+  '/ai-engine.js',
   '/manifest.json',
-  'https://cdn.tailwindcss.com',
-  'https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap',
-  'https://unpkg.com/pdfjs-dist@4.3.136/build/pdf.min.mjs',
-  'https://unpkg.com/pdfjs-dist@4.3.136/build/pdf.worker.min.mjs',
-  'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.3.3'
+  '/sw.js'
 ];
 
-// Install Event
+// Install Event — cache local assets only
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
       console.log('[Service Worker] Pre-caching static assets');
-      return cache.addAll(ASSETS_TO_CACHE);
+      // addAll throws if any request fails, so wrap each individually
+      return Promise.allSettled(
+        ASSETS_TO_CACHE.map((url) =>
+          cache.add(url).catch((err) =>
+            console.warn('[Service Worker] Failed to cache:', url, err)
+          )
+        )
+      );
     }).then(() => self.skipWaiting())
   );
 });
@@ -35,7 +42,7 @@ self.addEventListener('activate', (event) => {
     caches.keys().then((cacheNames) => {
       return Promise.all(
         cacheNames.map((cache) => {
-          if (cache !== CACHE_NAME && cache.startsWith('gabayai-')) {
+          if (cache !== CACHE_NAME && (cache.startsWith('gabayai-') || cache.startsWith('mulatai-'))) {
             console.log('[Service Worker] Clearing old cache:', cache);
             return caches.delete(cache);
           }
@@ -45,36 +52,43 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Fetch Event (Stale-While-Revalidate)
+// Fetch Event (Stale-While-Revalidate for local assets, network-first for CDN)
 self.addEventListener('fetch', (event) => {
   const url = event.request.url;
 
-  // 1. Bypass Service Worker cache for HuggingFace model weights.
-  // Transformers.js handles its own model caching inside the page context using the Cache API.
-  // Intercepting these large binary files (~1GB) in the Service Worker is memory-intensive
-  // and can cause storage quota crashes.
+  // 1. Bypass: HuggingFace model weights — Transformers.js handles its own caching.
   if (
-    url.includes('huggingface.co') || 
-    url.includes('onnx') || 
-    url.endsWith('.onnx') || 
+    url.includes('huggingface.co') ||
+    url.includes('onnx') ||
+    url.endsWith('.onnx') ||
     url.endsWith('.bin')
   ) {
-    // Return network response directly, ignoring cache.
     return;
   }
 
-  // 2. Only cache GET requests
+  // 2. Bypass: External CDN requests — let them hit the network directly.
+  //    Caching opaque cross-origin responses wastes quota and can cause failures.
+  if (
+    url.includes('cdn.tailwindcss.com') ||
+    url.includes('cdn.jsdelivr.net') ||
+    url.includes('fonts.googleapis.com') ||
+    url.includes('fonts.gstatic.com') ||
+    url.includes('unpkg.com')
+  ) {
+    return;
+  }
+
+  // 3. Only cache GET requests
   if (event.request.method !== 'GET') {
     return;
   }
 
-  // 3. Stale-While-Revalidate Strategy for site assets & static CDNs
+  // 4. Stale-While-Revalidate for local site assets
   event.respondWith(
     caches.open(CACHE_NAME).then((cache) => {
       return cache.match(event.request).then((cachedResponse) => {
         const fetchPromise = fetch(event.request)
           .then((networkResponse) => {
-            // Update cache in the background with the new response
             if (networkResponse.status === 200) {
               cache.put(event.request, networkResponse.clone());
             }
@@ -82,12 +96,10 @@ self.addEventListener('fetch', (event) => {
           })
           .catch((err) => {
             console.warn('[Service Worker] Fetch failed (probably offline):', err);
-            // Return cached response if offline fetch failed
             if (cachedResponse) return cachedResponse;
             throw err;
           });
 
-        // Return cached version immediately if we have it, else wait for network
         return cachedResponse || fetchPromise;
       });
     })
