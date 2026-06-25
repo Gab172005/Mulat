@@ -10,6 +10,7 @@ class StorageService {
   static const _kProfile = 'profile';
   static const _kMastery = 'mastery'; // Map<topic, double 0..1>
   static const _kApiKey = 'api_key';
+  static const _kRecent = 'recent_asked'; // List<String> recent question prompts
 
   Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
@@ -45,4 +46,14 @@ class StorageService {
       await _prefs.setString(_kApiKey, key);
     }
   }
+
+  // ---- Recently-asked questions (spaced-repetition cooldown) ----
+  List<String> loadRecentAsked() {
+    final raw = _prefs.getString(_kRecent);
+    if (raw == null) return [];
+    return List<String>.from(jsonDecode(raw));
+  }
+
+  Future<void> saveRecentAsked(List<String> items) =>
+      _prefs.setString(_kRecent, jsonEncode(items));
 }

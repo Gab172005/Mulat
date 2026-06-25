@@ -38,10 +38,14 @@ const Map<String, Map<String, String>> kOfflineLessons = {
   },
 };
 
-/// Offline practice bank, grouped by difficulty. Topics are general so the
-/// app works for "any subject". When online the AI generates fresh items.
+/// Subjects the adaptive practice rotates through.
+const List<String> kPracticeTopics = ['Math', 'Science', 'English'];
+
+/// Offline practice bank. Every topic has items at difficulty 1, 2, and 3,
+/// so the adaptive engine can always find a question at the right level for
+/// the student's weakest topic. When online, the AI generates fresh items.
 const List<PracticeQuestion> kOfflineQuestions = [
-  // ---- Difficulty 1 ----
+  // ============================ MATH ============================
   PracticeQuestion(
     topic: 'Math',
     difficulty: 1,
@@ -53,26 +57,15 @@ const List<PracticeQuestion> kOfflineQuestions = [
     explanationFil: 'Magkapareho ang denominator: 1/2 + 1/2 = 2/2 = 1.',
   ),
   PracticeQuestion(
-    topic: 'Science',
+    topic: 'Math',
     difficulty: 1,
-    prompt: 'Which gas do plants release during photosynthesis?',
-    promptFil: 'Anong gas ang inilalabas ng halaman sa potosintesis?',
-    choices: ['Carbon dioxide', 'Oxygen', 'Nitrogen', 'Hydrogen'],
-    answerIndex: 1,
-    explanation: 'Plants take in CO2 and release oxygen.',
-    explanationFil: 'Sumisipsip ng CO2 ang halaman at naglalabas ng oxygen.',
+    prompt: 'What is 6 × 7?',
+    promptFil: 'Ano ang 6 × 7?',
+    choices: ['42', '36', '48', '13'],
+    answerIndex: 0,
+    explanation: '6 groups of 7 = 42.',
+    explanationFil: '6 na grupo ng 7 = 42.',
   ),
-  PracticeQuestion(
-    topic: 'English',
-    difficulty: 1,
-    prompt: 'Which word is a verb? "The cat sleeps."',
-    promptFil: 'Aling salita ang pandiwa? "The cat sleeps."',
-    choices: ['The', 'cat', 'sleeps', 'none'],
-    answerIndex: 2,
-    explanation: '"Sleeps" is the action word (verb).',
-    explanationFil: 'Ang "sleeps" ang salitang kilos (pandiwa).',
-  ),
-  // ---- Difficulty 2 ----
   PracticeQuestion(
     topic: 'Math',
     difficulty: 2,
@@ -84,18 +77,6 @@ const List<PracticeQuestion> kOfflineQuestions = [
     explanationFil: '3/4 = 6/8, kaya 6/8 + 1/8 = 7/8.',
   ),
   PracticeQuestion(
-    topic: 'Science',
-    difficulty: 2,
-    prompt: 'A jeepney stops suddenly and you lurch forward. This is due to?',
-    promptFil:
-        'Biglang huminto ang jeep at napasubsob ka. Dahil ito sa?',
-    choices: ['Gravity', 'Inertia', 'Friction', 'Magnetism'],
-    answerIndex: 1,
-    explanation: "Inertia (Newton's First Law) keeps you moving forward.",
-    explanationFil:
-        'Ang inertia (Unang Batas ni Newton) ang dahilan ng pagpapatuloy mo sa paggalaw.',
-  ),
-  PracticeQuestion(
     topic: 'Math',
     difficulty: 2,
     prompt: 'Solve for x: 2x + 4 = 10',
@@ -105,16 +86,68 @@ const List<PracticeQuestion> kOfflineQuestions = [
     explanation: '2x = 6, so x = 3.',
     explanationFil: '2x = 6, kaya x = 3.',
   ),
-  // ---- Difficulty 3 ----
   PracticeQuestion(
     topic: 'Math',
     difficulty: 3,
-    prompt: 'If x = 3, what is 2x^2 - 5x + 1?',
-    promptFil: 'Kung x = 3, ano ang 2x^2 - 5x + 1?',
+    prompt: 'If x = 3, what is 2x² - 5x + 1?',
+    promptFil: 'Kung x = 3, ano ang 2x² - 5x + 1?',
     choices: ['4', '7', '10', '13'],
     answerIndex: 0,
     explanation: '2(9) - 15 + 1 = 18 - 15 + 1 = 4.',
     explanationFil: '2(9) - 15 + 1 = 18 - 15 + 1 = 4.',
+  ),
+  PracticeQuestion(
+    topic: 'Math',
+    difficulty: 3,
+    prompt: 'What is 15% of 200?',
+    promptFil: 'Ano ang 15% ng 200?',
+    choices: ['15', '30', '45', '20'],
+    answerIndex: 1,
+    explanation: '15% = 0.15; 0.15 × 200 = 30.',
+    explanationFil: '15% = 0.15; 0.15 × 200 = 30.',
+  ),
+
+  // ============================ SCIENCE ============================
+  PracticeQuestion(
+    topic: 'Science',
+    difficulty: 1,
+    prompt: 'Which gas do plants release during photosynthesis?',
+    promptFil: 'Anong gas ang inilalabas ng halaman sa potosintesis?',
+    choices: ['Carbon dioxide', 'Oxygen', 'Nitrogen', 'Hydrogen'],
+    answerIndex: 1,
+    explanation: 'Plants take in CO2 and release oxygen.',
+    explanationFil: 'Sumisipsip ng CO2 ang halaman at naglalabas ng oxygen.',
+  ),
+  PracticeQuestion(
+    topic: 'Science',
+    difficulty: 1,
+    prompt: 'What is H₂O commonly known as?',
+    promptFil: 'Ano ang karaniwang tawag sa H₂O?',
+    choices: ['Salt', 'Water', 'Air', 'Sugar'],
+    answerIndex: 1,
+    explanation: 'H₂O is the chemical formula for water.',
+    explanationFil: 'Ang H₂O ay ang pormula ng tubig.',
+  ),
+  PracticeQuestion(
+    topic: 'Science',
+    difficulty: 2,
+    prompt: 'A jeepney stops suddenly and you lurch forward. This is due to?',
+    promptFil: 'Biglang huminto ang jeep at napasubsob ka. Dahil ito sa?',
+    choices: ['Gravity', 'Inertia', 'Friction', 'Magnetism'],
+    answerIndex: 1,
+    explanation: "Inertia (Newton's First Law) keeps you moving forward.",
+    explanationFil:
+        'Ang inertia (Unang Batas ni Newton) ang dahilan ng pagpapatuloy mo sa paggalaw.',
+  ),
+  PracticeQuestion(
+    topic: 'Science',
+    difficulty: 2,
+    prompt: 'Which part of a plant absorbs water from the soil?',
+    promptFil: 'Aling bahagi ng halaman ang sumisipsip ng tubig mula sa lupa?',
+    choices: ['Leaves', 'Roots', 'Flower', 'Stem'],
+    answerIndex: 1,
+    explanation: 'Roots absorb water and nutrients from the soil.',
+    explanationFil: 'Ang ugat ang sumisipsip ng tubig at sustansya sa lupa.',
   ),
   PracticeQuestion(
     topic: 'Science',
@@ -128,5 +161,78 @@ const List<PracticeQuestion> kOfflineQuestions = [
     explanation: 'Condensation cools vapor into cloud droplets.',
     explanationFil:
         'Pinapalamig ng condensation ang singaw paging maliliit na patak ng ulap.',
+  ),
+  PracticeQuestion(
+    topic: 'Science',
+    difficulty: 3,
+    prompt: 'Which part of the cell produces most of its energy?',
+    promptFil: 'Aling bahagi ng selula ang gumagawa ng halos lahat ng enerhiya nito?',
+    choices: ['Nucleus', 'Mitochondria', 'Cell wall', 'Vacuole'],
+    answerIndex: 1,
+    explanation: 'The mitochondria are the powerhouse of the cell.',
+    explanationFil: 'Ang mitochondria ang "powerhouse" o pinagkukunan ng enerhiya ng selula.',
+  ),
+
+  // ============================ ENGLISH ============================
+  PracticeQuestion(
+    topic: 'English',
+    difficulty: 1,
+    prompt: 'Which word is a verb? "The cat sleeps."',
+    promptFil: 'Aling salita ang pandiwa? "The cat sleeps."',
+    choices: ['The', 'cat', 'sleeps', 'none'],
+    answerIndex: 2,
+    explanation: '"Sleeps" is the action word (verb).',
+    explanationFil: 'Ang "sleeps" ang salitang kilos (pandiwa).',
+  ),
+  PracticeQuestion(
+    topic: 'English',
+    difficulty: 1,
+    prompt: 'Which of these is a noun?',
+    promptFil: 'Alin sa mga ito ang pangngalan (noun)?',
+    choices: ['run', 'dog', 'quickly', 'blue'],
+    answerIndex: 1,
+    explanation: 'A noun names a person, place, or thing — "dog".',
+    explanationFil: 'Ang pangngalan ay tao, lugar, o bagay — "dog".',
+  ),
+  PracticeQuestion(
+    topic: 'English',
+    difficulty: 2,
+    prompt: 'What is the past tense of "go"?',
+    promptFil: 'Ano ang past tense ng "go"?',
+    choices: ['goed', 'gone', 'went', 'going'],
+    answerIndex: 2,
+    explanation: '"Go" is irregular; its past tense is "went".',
+    explanationFil: 'Iregular ang "go"; ang past tense nito ay "went".',
+  ),
+  PracticeQuestion(
+    topic: 'English',
+    difficulty: 2,
+    prompt: 'Choose the correct word: "She ___ to school every day."',
+    promptFil: 'Piliin ang tamang salita: "She ___ to school every day."',
+    choices: ['go', 'goes', 'going', 'gone'],
+    answerIndex: 1,
+    explanation: 'Third-person singular takes "goes".',
+    explanationFil: 'Sa third-person singular, ginagamit ang "goes".',
+  ),
+  PracticeQuestion(
+    topic: 'English',
+    difficulty: 3,
+    prompt: 'Which word is a synonym of "happy"?',
+    promptFil: 'Aling salita ang kasingkahulugan ng "happy"?',
+    choices: ['sad', 'glad', 'angry', 'tired'],
+    answerIndex: 1,
+    explanation: '"Glad" means the same as "happy".',
+    explanationFil: 'Ang "glad" ay kapareho ng kahulugan ng "happy".',
+  ),
+  PracticeQuestion(
+    topic: 'English',
+    difficulty: 3,
+    prompt: 'Identify the adjective: "The tall building is new."',
+    promptFil: 'Tukuyin ang pang-uri (adjective): "The tall building is new."',
+    choices: ['building', 'tall', 'is', 'the'],
+    answerIndex: 1,
+    explanation: '"Tall" describes the noun "building", so it is an adjective.',
+    explanationFil:
+        'Inilalarawan ng "tall" ang pangngalang "building", kaya ito ay pang-uri.',
   ),
 ];

@@ -112,11 +112,13 @@ class AiService {
   }
 
   // ------------------------------------------------------------- PRACTICE
-  /// Picks/creates a question at the target difficulty (1..3).
+  /// Picks/creates a question for a specific [topic] at [difficulty],
+  /// skipping anything in [exclude] (already-answered prompts this session).
   Future<PracticeQuestion> nextQuestion({
     required StudentProfile p,
     required int difficulty,
-    String topic = 'General',
+    required String topic,
+    Set<String> exclude = const {},
   }) async {
     if (_canUseLive) {
       try {
@@ -125,15 +127,33 @@ class AiService {
         // fall through to offline bank
       }
     }
-    return _offlineQuestion(difficulty);
+    return _offlineQuestion(topic, difficulty, exclude);
   }
 
-  PracticeQuestion _offlineQuestion(int difficulty) {
-    final pool =
-        kOfflineQuestions.where((q) => q.difficulty == difficulty).toList();
-    final fallback = pool.isNotEmpty ? pool : kOfflineQuestions;
-    fallback.shuffle();
-    return fallback.first;
+  /// Offline picker that stays on-target: prefer the exact topic+difficulty,
+  /// then relax step by step, and only repeat a question as a last resort.
+  PracticeQuestion _offlineQuestion(
+      String topic, int difficulty, Set<String> exclude) {
+    final tiers = <bool Function(PracticeQuestion)>[
+      (q) => q.topic == topic && q.difficulty == difficulty && !exclude.contains(q.prompt),
+      (q) => q.topic == topic && !exclude.contains(q.prompt),
+      (q) => q.difficulty == difficulty && !exclude.contains(q.prompt),
+      (q) => !exclude.contains(q.prompt),
+    ];
+    for (final match in tiers) {
+      final pool = kOfflineQuestions.where(match).toList();
+      if (pool.isNotEmpty) {
+        pool.shuffle();
+        return pool.first;
+      }
+    }
+    // Everything's been seen — reset and reuse the closest match.
+    final reset = kOfflineQuestions
+        .where((q) => q.topic == topic && q.difficulty == difficulty)
+        .toList();
+    final list = reset.isNotEmpty ? reset : List.of(kOfflineQuestions);
+    list.shuffle();
+    return list.first;
   }
 
   Future<PracticeQuestion> _generateQuestion(
@@ -147,7 +167,12 @@ class AiService {
       'explanation, explanationFil. promptFil/explanationFil are Filipino.',
     );
     final jsonStr = raw.substring(raw.indexOf('{'), raw.lastIndexOf('}') + 1);
-    return PracticeQuestion.fromJson(jsonDecode(jsonStr));
+    final map = jsonDecode(jsonStr) as Map<String, dynamic>;
+    // Force our canonical topic/difficulty so mastery is tracked consistently
+    // (the model sometimes returns "Mathematics" instead of "Math").
+    map['topic'] = topic;
+    map['difficulty'] = difficulty;
+    return PracticeQuestion.fromJson(map);
   }
 
   // ------------------------------------------------------------ LLM CALL

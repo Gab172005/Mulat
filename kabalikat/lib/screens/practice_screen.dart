@@ -19,6 +19,7 @@ class _PracticeScreenState extends State<PracticeScreen> {
   bool _loading = false;
   int _answered = 0;
   int _correct = 0;
+  String _focusTopic = '';
 
   Future<void> _load() async {
     final state = context.read<AppState>();
@@ -26,11 +27,20 @@ class _PracticeScreenState extends State<PracticeScreen> {
       _loading = true;
       _selected = null;
     });
-    final diff = state.adaptiveDifficulty();
-    final q = await state.ai
-        .nextQuestion(p: state.profile, difficulty: diff, topic: 'General');
+    // Drill the student's weakest topic, at the right level for that topic,
+    // skipping anything still on spaced-repetition cooldown.
+    final topic = state.weakestTopic();
+    final diff = state.difficultyFor(topic);
+    final q = await state.ai.nextQuestion(
+      p: state.profile,
+      difficulty: diff,
+      topic: topic,
+      exclude: state.cooldownExclude,
+    );
+    await state.markAsked(q.prompt);
     setState(() {
       _q = q;
+      _focusTopic = topic;
       _loading = false;
     });
   }
@@ -44,7 +54,7 @@ class _PracticeScreenState extends State<PracticeScreen> {
       _answered++;
       if (correct) _correct++;
     });
-    await state.recordAnswer(_q!.topic, correct);
+    await state.recordAnswer(_q!.topic, correct, _q!.difficulty);
   }
 
   @override
@@ -72,6 +82,11 @@ class _PracticeScreenState extends State<PracticeScreen> {
               Chip(label: Text('${q.topic} · Level ${q.difficulty}')),
               Text('Score: $_correct/$_answered'),
             ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Focus: $_focusTopic — your lowest-mastery topic right now.',
+            style: const TextStyle(fontSize: 12, color: Colors.white54),
           ),
           const SizedBox(height: 16),
           Text(fil ? q.promptFil : q.prompt,
@@ -115,7 +130,8 @@ class _PracticeScreenState extends State<PracticeScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              'Difficulty adapts to your mastery (${(state.overallMastery * 100).round()}%).',
+              'Difficulty adapts to your $_focusTopic mastery '
+              '(${(state.masteryFor(_focusTopic) * 100).round()}%).',
               style: const TextStyle(fontSize: 12, color: Colors.white54),
             ),
           ],

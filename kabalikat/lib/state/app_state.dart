@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import '../data/offline_content.dart';
 import '../models/student_profile.dart';
 import '../services/ai_service.dart';
 import '../services/connectivity_service.dart';
@@ -23,6 +24,12 @@ class AppState extends ChangeNotifier {
   StudentProfile profile = StudentProfile();
   Map<String, double> mastery = {}; // topic -> 0..1
 
+  // Spaced-repetition cooldown: most-recently-asked prompts (newest first).
+  // A question can't reappear until it falls out of the cooldown window.
+  List<String> _recentAsked = [];
+  static const int _cooldownWindow = 6; // questions to wait before a repeat
+  static const int _recentMax = 40; // history cap kept on disk
+
   AppState(this.storage) {
     ai = AiService(connectivity, storage, localModel);
   }
@@ -30,10 +37,25 @@ class AppState extends ChangeNotifier {
   Future<void> load() async {
     profile = storage.loadProfile();
     mastery = storage.loadMastery();
+    _recentAsked = storage.loadRecentAsked();
     await connectivity.init();
     connectivity.onChange.listen((_) => notifyListeners());
     localModel.addListener(notifyListeners);
     notifyListeners();
+  }
+
+  /// Prompts currently "on cooldown" — Practice should skip these.
+  Set<String> get cooldownExclude =>
+      _recentAsked.take(_cooldownWindow).toSet();
+
+  /// Record that a question was just shown (moves it to the front of history).
+  Future<void> markAsked(String prompt) async {
+    _recentAsked.remove(prompt);
+    _recentAsked.insert(0, prompt);
+    if (_recentAsked.length > _recentMax) {
+      _recentAsked = _recentAsked.sublist(0, _recentMax);
+    }
+    await storage.saveRecentAsked(_recentAsked);
   }
 
   bool get isOnline => connectivity.isOnline;
@@ -94,12 +116,31 @@ class AppState extends ChangeNotifier {
     return 3;
   }
 
-  /// Update mastery after an answer. Correct nudges up, wrong nudges down.
-  Future<void> recordAnswer(String topic, bool correct) async {
+  /// The topic the student is weakest at — what Practice should drill next.
+  /// Ties (e.g. a fresh start where all are equal) resolve to list order.
+  String weakestTopic() {
+    var weakest = kPracticeTopics.first;
+    var lowest = 2.0;
+    for (final t in kPracticeTopics) {
+      final m = masteryFor(t); // untouched topics default to 0.3
+      if (m < lowest) {
+        lowest = m;
+        weakest = t;
+      }
+    }
+    return weakest;
+  }
+
+  /// Update mastery after an answer, weighted by question difficulty (1..3).
+  /// Harder questions are worth more when correct; missing an EASY question
+  /// costs more (it signals a real gap), missing a hard one costs little.
+  Future<void> recordAnswer(String topic, bool correct, int difficulty) async {
+    const gain = {1: 0.06, 2: 0.12, 3: 0.20}; // reward scales up with difficulty
+    const penalty = {1: 0.12, 2: 0.08, 3: 0.05}; // penalty scales down
+    final d = difficulty.clamp(1, 3);
     final cur = masteryFor(topic);
-    final next =
-        correct ? (cur + 0.15).clamp(0.0, 1.0) : (cur - 0.1).clamp(0.0, 1.0);
-    mastery[topic] = next;
+    final delta = correct ? gain[d]! : -penalty[d]!;
+    mastery[topic] = (cur + delta).clamp(0.0, 1.0);
     await storage.saveMastery(mastery);
     notifyListeners();
   }
