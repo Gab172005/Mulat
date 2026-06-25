@@ -79,8 +79,22 @@ class AppState extends ChangeNotifier {
 
   Future<void> updateSettings({AppLanguage? lang, int? grade}) async {
     if (lang != null) profile.language = lang;
-    if (grade != null) profile.grade = grade;
+    // Changing grade means new-level content — reset progress so mastery
+    // reflects the new grade, not the old one.
+    if (grade != null && grade != profile.grade) {
+      profile.grade = grade;
+      await resetProgress();
+    }
     await storage.saveProfile(profile);
+    notifyListeners();
+  }
+
+  /// Wipe mastery + question cooldown (e.g. on grade change or a manual reset).
+  Future<void> resetProgress() async {
+    mastery = {};
+    _recentAsked = [];
+    await storage.saveMastery(mastery);
+    await storage.saveRecentAsked(_recentAsked);
     notifyListeners();
   }
 
