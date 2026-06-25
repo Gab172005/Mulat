@@ -32,10 +32,13 @@ class AiService {
 
   AiService(this.connectivity, this.storage, this.localModel);
 
-  // Anthropic Messages API. Swap baseUrl/headers for any OpenAI-compatible
-  // endpoint if your team prefers.
-  static const _baseUrl = 'https://api.anthropic.com/v1/messages';
-  static const _model = 'claude-haiku-4-5-20251001';
+  // Google Gemini API (key from Google AI Studio: https://aistudio.google.com/apikey).
+  // Swap _model for any available Gemini model (e.g. gemini-2.5-flash).
+  // Tried in order. If the newest model is overloaded (503), we retry, then
+  // fall back to the next, steadier model so the live tier stays up.
+  static const _models = ['gemini-3.5-flash', 'gemini-2.5-flash'];
+  static const _baseUrl =
+      'https://generativelanguage.googleapis.com/v1beta/models';
 
   bool get _canUseLive =>
       connectivity.isOnline &&
@@ -45,7 +48,20 @@ class AiService {
       'You are Kabalikat, a patient study companion for a Grade ${p.grade} '
       'Filipino student. ${p.language.promptHint} Keep it short, use a '
       'simple local example, and end with one quick check-question. '
+      'Write in plain text only — no Markdown, asterisks, bullets, or headings. '
       'Student asks: "$question"';
+
+  /// Strip leftover Markdown emphasis (**bold**, *italic*) so the plain-text
+  /// chat bubble doesn't show literal asterisks.
+  String _stripMarkdown(String s) => s
+      .replaceAllMapped(RegExp(r'\*\*(.*?)\*\*'), (m) => m[1] ?? '')
+      .replaceAll(RegExp(r'(?<!\*)\*(?!\*)'), '')
+      .replaceAll(RegExp(r'^#{1,6}\s*', multiLine: true), '')
+      .trim();
+
+  // Temporary: surface live-AI errors in the chat so we can debug the key /
+  // endpoint. Set back to false once the cloud tier is confirmed working.
+  static const bool _debugShowCloudErrors = true;
 
   // ---------------------------------------------------------------- TUTOR
   Future<TutorReply> tutor(String question, StudentProfile p) async {
@@ -53,8 +69,11 @@ class AiService {
     if (_canUseLive) {
       try {
         final text = await _callLlm(_tutorPrompt(question, p));
-        return TutorReply(text, source: AnswerSource.cloud);
-      } catch (_) {
+        return TutorReply(_stripMarkdown(text), source: AnswerSource.cloud);
+      } catch (e) {
+        if (_debugShowCloudErrors) {
+          return TutorReply('⚠️ Live AI failed:\n$e', source: AnswerSource.cached);
+        }
         // fall through
       }
     }
@@ -63,7 +82,7 @@ class AiService {
       try {
         final text = await localModel.generate(_tutorPrompt(question, p));
         if (text != null && text.trim().isNotEmpty) {
-          return TutorReply(text.trim(), source: AnswerSource.onDevice);
+          return TutorReply(_stripMarkdown(text), source: AnswerSource.onDevice);
         }
       } catch (_) {
         // fall through
@@ -133,25 +152,52 @@ class AiService {
 
   // ------------------------------------------------------------ LLM CALL
   Future<String> _callLlm(String prompt) async {
-    final res = await http.post(
-      Uri.parse(_baseUrl),
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': storage.apiKey ?? '',
-        'anthropic-version': '2023-06-01',
+    final key = storage.apiKey ?? '';
+    final body = jsonEncode({
+      'contents': [
+        {
+          'parts': [
+            {'text': prompt}
+          ]
+        }
+      ],
+      'generationConfig': {
+        'maxOutputTokens': 800,
+        // Disable "thinking": faster replies, and the token budget goes to the
+        // actual answer instead of internal reasoning.
+        'thinkingConfig': {'thinkingBudget': 0},
       },
-      body: jsonEncode({
-        'model': _model,
-        'max_tokens': 600,
-        'messages': [
-          {'role': 'user', 'content': prompt}
-        ],
-      }),
-    );
-    if (res.statusCode != 200) {
-      throw Exception('LLM error ${res.statusCode}');
+    });
+
+    Object? lastError;
+    // Try each model; retry transient overloads (503/500/429) with backoff.
+    for (final model in _models) {
+      for (var attempt = 0; attempt < 2; attempt++) {
+        try {
+          final res = await http.post(
+            Uri.parse('$_baseUrl/$model:generateContent'),
+            headers: {'content-type': 'application/json', 'x-goog-api-key': key},
+            body: body,
+          );
+          if (res.statusCode == 200) {
+            final data = jsonDecode(res.body);
+            return (data['candidates'][0]['content']['parts'][0]['text']
+                    as String)
+                .trim();
+          }
+          lastError = 'Gemini error ${res.statusCode}: ${res.body}';
+          // Only retry/fall back on transient server issues.
+          final transient = res.statusCode == 503 ||
+              res.statusCode == 500 ||
+              res.statusCode == 429;
+          if (!transient) throw Exception(lastError);
+          await Future.delayed(Duration(milliseconds: 600 * (attempt + 1)));
+        } catch (e) {
+          lastError = e;
+          await Future.delayed(const Duration(milliseconds: 400));
+        }
+      }
     }
-    final data = jsonDecode(res.body);
-    return (data['content'][0]['text'] as String).trim();
+    throw Exception(lastError ?? 'Gemini call failed');
   }
 }
