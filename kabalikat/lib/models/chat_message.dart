@@ -1,13 +1,13 @@
 class ChatMessage {
   final String text;
   final bool fromUser;
-  final bool offline; // answered from cache (no connection)
+  final String? badge; // e.g. "on-device" / "cached · offline"; null = cloud
   final DateTime time;
 
   ChatMessage({
     required this.text,
     required this.fromUser,
-    this.offline = false,
+    this.badge,
     DateTime? time,
   }) : time = time ?? DateTime.now();
 }

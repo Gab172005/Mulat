@@ -6,23 +6,31 @@ import '../models/practice_question.dart';
 import '../data/offline_content.dart';
 import 'connectivity_service.dart';
 import 'storage_service.dart';
+import 'local_model_service.dart';
 
-/// Result of a tutor turn: the text plus whether it came from cache.
+/// Where a tutor answer came from — drives the badge shown in chat.
+enum AnswerSource { cloud, onDevice, cached }
+
+/// Result of a tutor turn: the text plus which tier produced it.
 class TutorReply {
   final String text;
-  final bool offline;
-  TutorReply(this.text, {this.offline = false});
+  final AnswerSource source;
+  TutorReply(this.text, {this.source = AnswerSource.cloud});
+
+  bool get offline => source != AnswerSource.cloud;
 }
 
-/// Hybrid AI brain.
-///  - ONLINE + API key  -> live LLM (bilingual, grade-aware).
-///  - OFFLINE / no key   -> bundled cached content (keyword tutor + question bank).
-/// Either way the app keeps working; offline is the default, not an error.
+/// Hybrid AI brain — three tiers of graceful degradation:
+///  1. ONLINE + API key      -> cloud LLM (best quality, bilingual, grade-aware)
+///  2. OFFLINE + local model  -> on-device LLM (real AI, no signal)
+///  3. OFFLINE / no model     -> bundled cached content (always works)
+/// The app keeps teaching no matter what; each tier is a fallback, not an error.
 class AiService {
   final ConnectivityService connectivity;
   final StorageService storage;
+  final LocalModelService localModel;
 
-  AiService(this.connectivity, this.storage);
+  AiService(this.connectivity, this.storage, this.localModel);
 
   // Anthropic Messages API. Swap baseUrl/headers for any OpenAI-compatible
   // endpoint if your team prefers.
@@ -33,22 +41,36 @@ class AiService {
       connectivity.isOnline &&
       (storage.apiKey != null && storage.apiKey!.isNotEmpty);
 
+  String _tutorPrompt(String question, StudentProfile p) =>
+      'You are Kabalikat, a patient study companion for a Grade ${p.grade} '
+      'Filipino student. ${p.language.promptHint} Keep it short, use a '
+      'simple local example, and end with one quick check-question. '
+      'Student asks: "$question"';
+
   // ---------------------------------------------------------------- TUTOR
   Future<TutorReply> tutor(String question, StudentProfile p) async {
+    // Tier 1: cloud LLM when online + key.
     if (_canUseLive) {
       try {
-        final text = await _callLlm(
-          'You are Kabalikat, a patient study companion for a Grade ${p.grade} '
-          'Filipino student. ${p.language.promptHint} Keep it short, use a '
-          'simple local example, and end with one quick check-question. '
-          'Student asks: "$question"',
-        );
-        return TutorReply(text);
+        final text = await _callLlm(_tutorPrompt(question, p));
+        return TutorReply(text, source: AnswerSource.cloud);
       } catch (_) {
-        // fall through to offline
+        // fall through
       }
     }
-    return TutorReply(_offlineTutor(question, p), offline: true);
+    // Tier 2: on-device model, if installed (works with no signal).
+    if (localModel.isReady) {
+      try {
+        final text = await localModel.generate(_tutorPrompt(question, p));
+        if (text != null && text.trim().isNotEmpty) {
+          return TutorReply(text.trim(), source: AnswerSource.onDevice);
+        }
+      } catch (_) {
+        // fall through
+      }
+    }
+    // Tier 3: bundled cached content (always available).
+    return TutorReply(_offlineTutor(question, p), source: AnswerSource.cached);
   }
 
   String _offlineTutor(String question, StudentProfile p) {

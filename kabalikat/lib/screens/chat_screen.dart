@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../state/app_state.dart';
 import '../models/chat_message.dart';
+import '../services/ai_service.dart';
 import '../theme.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -43,10 +44,21 @@ class _ChatScreenState extends State<ChatScreen> {
     final reply = await state.ai.tutor(q, state.profile);
     setState(() {
       _messages.add(ChatMessage(
-          text: reply.text, fromUser: false, offline: reply.offline));
+          text: reply.text, fromUser: false, badge: _badgeFor(reply.source)));
       _thinking = false;
     });
     _jump();
+  }
+
+  String? _badgeFor(AnswerSource s) {
+    switch (s) {
+      case AnswerSource.cloud:
+        return null;
+      case AnswerSource.onDevice:
+        return 'on-device AI · offline';
+      case AnswerSource.cached:
+        return 'cached · offline';
+    }
   }
 
   void _jump() {
@@ -79,11 +91,11 @@ class _ChatScreenState extends State<ChatScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(m.text),
-                    if (m.offline)
-                      const Padding(
-                        padding: EdgeInsets.only(top: 6),
-                        child: Text('cached · offline',
-                            style: TextStyle(
+                    if (m.badge != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Text(m.badge!,
+                            style: const TextStyle(
                                 fontSize: 10, color: Colors.white54)),
                       ),
                   ],

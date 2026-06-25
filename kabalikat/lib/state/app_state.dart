@@ -1,22 +1,30 @@
 import 'package:flutter/foundation.dart';
 
 import '../models/student_profile.dart';
-import '../services/storage_service.dart';
-import '../services/connectivity_service.dart';
 import '../services/ai_service.dart';
+import '../services/connectivity_service.dart';
+import '../services/gemma_local_model_service.dart';
+import '../services/local_model_service.dart';
+import '../services/storage_service.dart';
 
 /// Central app state. Holds the profile, per-topic mastery, connectivity,
 /// and the adaptive-difficulty logic used by the Practice screen.
 class AppState extends ChangeNotifier {
   final StorageService storage;
   final ConnectivityService connectivity = ConnectivityService();
+
+  // Tier-2 on-device model. Swap StubLocalModelService for the real
+  // flutter_gemma implementation to enable a true offline AI tutor
+  // (see ON_DEVICE_MODEL.md).
+  final LocalModelService localModel = GemmaLocalModelService();
+
   late final AiService ai;
 
   StudentProfile profile = StudentProfile();
   Map<String, double> mastery = {}; // topic -> 0..1
 
   AppState(this.storage) {
-    ai = AiService(connectivity, storage);
+    ai = AiService(connectivity, storage, localModel);
   }
 
   Future<void> load() async {
@@ -24,6 +32,7 @@ class AppState extends ChangeNotifier {
     mastery = storage.loadMastery();
     await connectivity.init();
     connectivity.onChange.listen((_) => notifyListeners());
+    localModel.addListener(notifyListeners);
     notifyListeners();
   }
 
@@ -58,8 +67,7 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  bool get hasApiKey =>
-      storage.apiKey != null && storage.apiKey!.isNotEmpty;
+  bool get hasApiKey => storage.apiKey != null && storage.apiKey!.isNotEmpty;
 
   // ---- Mastery / adaptivity ----
   double masteryFor(String topic) => mastery[topic] ?? 0.3;
@@ -89,9 +97,8 @@ class AppState extends ChangeNotifier {
   /// Update mastery after an answer. Correct nudges up, wrong nudges down.
   Future<void> recordAnswer(String topic, bool correct) async {
     final cur = masteryFor(topic);
-    final next = correct
-        ? (cur + 0.15).clamp(0.0, 1.0)
-        : (cur - 0.1).clamp(0.0, 1.0);
+    final next =
+        correct ? (cur + 0.15).clamp(0.0, 1.0) : (cur - 0.1).clamp(0.0, 1.0);
     mastery[topic] = next;
     await storage.saveMastery(mastery);
     notifyListeners();

@@ -17,7 +17,9 @@ generates fresh, grade-aligned content. Same app, graceful fallback.
 ## Features
 - 🗣️ **Bilingual tutor** — Filipino / English / Taglish toggle.
 - 🎯 **Adaptive practice** — difficulty (1–3) rises and falls with per-topic mastery.
-- 📡 **Hybrid AI** — live LLM when online, cached content when offline.
+- 📡 **3-tier AI** — cloud LLM online → optional on-device model offline →
+  bundled cached content. Graceful fallback so it always answers.
+  (On-device tier is built and ready to activate — see `../ON_DEVICE_MODEL.md`.)
 - 📈 **Progress dashboard** — overall + per-topic mastery, saved on-device.
 - 📱 **Mobile-first, lightweight** — text-only, minimal data, fast on cheap phones.
 
