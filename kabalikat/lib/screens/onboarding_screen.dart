@@ -1,0 +1,86 @@
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+import '../state/app_state.dart';
+import '../models/student_profile.dart';
+import '../theme.dart';
+
+class OnboardingScreen extends StatefulWidget {
+  const OnboardingScreen({super.key});
+
+  @override
+  State<OnboardingScreen> createState() => _OnboardingScreenState();
+}
+
+class _OnboardingScreenState extends State<OnboardingScreen> {
+  final _name = TextEditingController();
+  int _grade = 7;
+  AppLanguage _lang = AppLanguage.taglish;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: ListView(
+            children: [
+              const SizedBox(height: 24),
+              const Text('Kabalikat',
+                  style: TextStyle(
+                      fontSize: 36,
+                      fontWeight: FontWeight.bold,
+                      color: kAccent)),
+              const SizedBox(height: 6),
+              const Text('Your AI study buddy — kahit walang signal.',
+                  style: TextStyle(color: Colors.white70)),
+              const SizedBox(height: 32),
+              const Text('Ano ang pangalan mo? / Your name'),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _name,
+                decoration: const InputDecoration(hintText: 'Juan'),
+              ),
+              const SizedBox(height: 24),
+              const Text('Grade level'),
+              const SizedBox(height: 8),
+              DropdownButtonFormField<int>(
+                value: _grade,
+                items: [
+                  for (var g = 1; g <= 12; g++)
+                    DropdownMenuItem(value: g, child: Text('Grade $g'))
+                ],
+                onChanged: (v) => setState(() => _grade = v ?? 7),
+              ),
+              const SizedBox(height: 24),
+              const Text('Wikang gagamitin / Language'),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                children: [
+                  for (final l in AppLanguage.values)
+                    ChoiceChip(
+                      label: Text(l.label),
+                      selected: _lang == l,
+                      onSelected: (_) => setState(() => _lang = l),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 40),
+              ElevatedButton(
+                onPressed: () {
+                  context.read<AppState>().completeOnboarding(
+                        _name.text.trim().isEmpty ? 'Estudyante' : _name.text.trim(),
+                        _grade,
+                        _lang,
+                      );
+                },
+                child: const Text('Simulan / Start'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
