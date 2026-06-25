@@ -1,0 +1,182 @@
+/* 
+  GabayAI - Custom Animations and Premium 3D Flashcard Transitions
+  Complementary to Tailwind CSS CDN styles.
+*/
+
+:root {
+  --perspective-value: 1200px;
+  --flip-duration: 0.6s;
+  --card-shadow: 0 15px 35px rgba(0, 0, 0, 0.1), 0 5px 15px rgba(0, 0, 0, 0.05);
+  --card-shadow-hover: 0 20px 40px rgba(0, 0, 0, 0.15), 0 8px 20px rgba(0, 0, 0, 0.08);
+}
+
+/* Base custom font configuration */
+body {
+  font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 3D Flipping Utilities */
+.perspective {
+  perspective: var(--perspective-value);
+}
+
+.preserve-3d {
+  transform-style: preserve-3d;
+}
+
+.backface-hidden {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.rotate-y-180 {
+  transform: rotateY(180deg);
+}
+
+/* Interactive Card Base */
+.flashcard-container {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1.6 / 1; /* Desktop/Tablet scale */
+  max-height: 380px;
+  min-height: 240px;
+  cursor: pointer;
+}
+
+@media (max-width: 640px) {
+  .flashcard-container {
+    aspect-ratio: 1.4 / 1;
+    min-height: 280px;
+  }
+}
+
+.flashcard-inner {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  transition: transform var(--flip-duration) cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: var(--card-shadow);
+  border-radius: 1.5rem;
+}
+
+.flashcard-container:hover .flashcard-inner {
+  box-shadow: var(--card-shadow-hover);
+}
+
+.flashcard-front, .flashcard-back {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border-radius: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 2rem;
+  overflow-y: auto;
+}
+
+/* Custom Scrollbar for Card Texts */
+.flashcard-front::-webkit-scrollbar,
+.flashcard-back::-webkit-scrollbar,
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.flashcard-front::-webkit-scrollbar-track,
+.flashcard-back::-webkit-scrollbar-track,
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.flashcard-front::-webkit-scrollbar-thumb,
+.flashcard-back::-webkit-scrollbar-thumb,
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(156, 163, 175, 0.3);
+  border-radius: 9999px;
+}
+
+.flashcard-front::-webkit-scrollbar-thumb:hover,
+.flashcard-back::-webkit-scrollbar-thumb:hover,
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(156, 163, 175, 0.5);
+}
+
+/* Pulse Glow Keyframes for status badges */
+@keyframes glow-green {
+  0%, 100% { box-shadow: 0 0 4px rgba(34, 197, 94, 0.4); }
+  50% { box-shadow: 0 0 12px rgba(34, 197, 94, 0.8); }
+}
+
+@keyframes glow-red {
+  0%, 100% { box-shadow: 0 0 4px rgba(239, 68, 68, 0.4); }
+  50% { box-shadow: 0 0 12px rgba(239, 68, 68, 0.8); }
+}
+
+.glow-active-green {
+  animation: glow-green 2s infinite ease-in-out;
+}
+
+.glow-active-red {
+  animation: glow-red 2s infinite ease-in-out;
+}
+
+/* Shimmer animation for download progress */
+@keyframes progress-shimmer {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+.shimmer-progress {
+  background: linear-gradient(-45deg, #6366f1, #8b5cf6, #ec4899, #3b82f6);
+  background-size: 400% 400%;
+  animation: progress-shimmer 3s ease infinite;
+}
+
+/* Glassmorphism overlays */
+.glass-panel {
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+.dark .glass-panel {
+  background: rgba(15, 23, 42, 0.8);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* Smooth Slide and Fade Animations */
+.slide-in {
+  animation: slideIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Option Cards in Quiz */
+.option-btn {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.option-btn:not(:disabled):hover {
+  transform: translateY(-2px);
+}
+
+.option-btn:active {
+  transform: translateY(0);
+}
