@@ -92,7 +92,8 @@ class AppState extends ChangeNotifier {
   bool get hasApiKey => storage.apiKey != null && storage.apiKey!.isNotEmpty;
 
   // ---- Mastery / adaptivity ----
-  double masteryFor(String topic) => mastery[topic] ?? 0.3;
+  // Untouched topics start at 0 — mastery is earned from answers, not given.
+  double masteryFor(String topic) => mastery[topic] ?? 0.0;
 
   double get overallMastery {
     if (mastery.isEmpty) return 0;
