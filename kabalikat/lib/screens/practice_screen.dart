@@ -143,21 +143,21 @@ class _ChoiceTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    Color border = Colors.white24;
+    Color border = kBorder;
     if (state == _TileState.correct) border = const Color(0xFF6BE39A);
     if (state == _TileState.wrong) border = const Color(0xFFFF9D6B);
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.only(bottom: 12),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         child: Container(
           width: double.infinity,
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: kSurface,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: border, width: 1.5),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: border, width: state == _TileState.neutral ? 1.0 : 2.0),
           ),
           child: Text(text, style: const TextStyle(fontSize: 16)),
         ),

@@ -93,22 +93,21 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
         ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           child: Row(
             children: [
               Expanded(
                 child: TextField(
                   controller: _input,
                   onSubmitted: (_) => _send(),
-                  decoration:
-                      const InputDecoration(hintText: 'Magtanong ka...'),
+                  decoration: InputDecoration(
+                    hintText: 'Ask anything...',
+                    suffixIcon: IconButton(
+                      icon: const Icon(Icons.send, color: kPrimary),
+                      onPressed: _send,
+                    ),
+                  ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              FloatingActionButton(
-                onPressed: _send,
-                backgroundColor: kPrimary,
-                child: const Icon(Icons.send),
               ),
             ],
           ),
@@ -127,16 +126,30 @@ class _Bubble extends StatelessWidget {
   Widget build(BuildContext context) {
     return Align(
       alignment: fromUser ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 6),
-        padding: const EdgeInsets.all(12),
-        constraints: BoxConstraints(
-            maxWidth: MediaQuery.of(context).size.width * 0.78),
-        decoration: BoxDecoration(
-          color: fromUser ? kPrimary : kSurface,
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: child,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (!fromUser)
+            const Padding(
+              padding: EdgeInsets.only(right: 8, top: 4),
+              child: Icon(Icons.auto_awesome, color: kPrimary, size: 20),
+            ),
+          Flexible(
+            child: Container(
+              margin: const EdgeInsets.symmetric(vertical: 6),
+              padding: const EdgeInsets.all(16),
+              constraints: BoxConstraints(
+                  maxWidth: MediaQuery.of(context).size.width * 0.75),
+              decoration: BoxDecoration(
+                color: fromUser ? kSurface : Colors.transparent,
+                border: fromUser ? null : Border.all(color: kBorder),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: child,
+            ),
+          ),
+        ],
       ),
     );
   }

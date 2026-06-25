@@ -1,8 +1,10 @@
 import 'dart:convert';
+import 'dart:io' show Platform;
 import 'package:http/http.dart' as http;
 
 import '../models/student_profile.dart';
 import '../models/practice_question.dart';
+import '../models/study_deck.dart';
 import '../data/offline_content.dart';
 import 'connectivity_service.dart';
 import 'storage_service.dart';
@@ -107,6 +109,55 @@ class AiService {
     );
     final jsonStr = raw.substring(raw.indexOf('{'), raw.lastIndexOf('}') + 1);
     return PracticeQuestion.fromJson(jsonDecode(jsonStr));
+  }
+
+  // ------------------------------------------------------------- DECK GEN
+  Future<StudyDeck> generateStudyDeck(String documentText, String title) async {
+    // Truncate document text if too long for local model context
+    final maxLength = 6000;
+    final text = documentText.length > maxLength
+        ? documentText.substring(0, maxLength)
+        : documentText;
+
+    final prompt = '''
+You are a helpful study assistant. Create a study deck from the following document.
+Return ONLY valid JSON with no markdown formatting. The JSON must have two keys: "flashcards" and "quizzes".
+"flashcards" is an array of objects with "front" (question/concept) and "back" (answer/definition).
+"quizzes" is an array of objects with "question", "options" (array of 4 strings), and "answerIndex" (0-3).
+
+Document Text:
+$text
+''';
+
+    final host = Platform.isAndroid ? '10.0.2.2' : 'localhost';
+    final res = await http.post(
+      Uri.parse('http://$host:11434/api/generate'),
+      headers: {'content-type': 'application/json'},
+      body: jsonEncode({
+        'model': 'llama3.2:latest',
+        'prompt': prompt,
+        'stream': false,
+        'format': 'json',
+      }),
+    );
+
+    if (res.statusCode != 200) {
+      throw Exception('Ollama error ${res.statusCode}');
+    }
+
+    final data = jsonDecode(res.body);
+    final responseText = data['response'] as String;
+
+    try {
+      final jsonMap = jsonDecode(responseText);
+      return StudyDeck.fromJson({
+        'title': title,
+        'flashcards': jsonMap['flashcards'] ?? [],
+        'quizzes': jsonMap['quizzes'] ?? [],
+      });
+    } catch (e) {
+      throw Exception('Failed to parse Study Deck JSON from Ollama: $e\\nResponse was: $responseText');
+    }
   }
 
   // ------------------------------------------------------------ LLM CALL

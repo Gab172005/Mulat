@@ -26,11 +26,18 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           child: ListView(
             children: [
               const SizedBox(height: 24),
-              const Text('Kabalikat',
-                  style: TextStyle(
-                      fontSize: 36,
-                      fontWeight: FontWeight.bold,
-                      color: kAccent)),
+              ShaderMask(
+                shaderCallback: (bounds) => const LinearGradient(
+                  colors: [kPrimary, kAccent],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ).createShader(bounds),
+                child: const Text('Kabalikat',
+                    style: TextStyle(
+                        fontSize: 48,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white)),
+              ),
               const SizedBox(height: 6),
               const Text('Your AI study buddy — kahit walang signal.',
                   style: TextStyle(color: Colors.white70)),

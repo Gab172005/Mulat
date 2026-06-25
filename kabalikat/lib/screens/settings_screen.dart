@@ -56,12 +56,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
         const Divider(height: 40),
 
         // Demo: simulate offline
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          title: const Text('Demo: simulate offline'),
-          subtitle: const Text('Force cached mode without airplane mode'),
-          value: !state.isOnline,
-          onChanged: (v) => state.toggleDemoOffline(v),
+        Container(
+          decoration: BoxDecoration(
+            color: Theme.of(context).cardColor,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.white12),
+          ),
+          child: SwitchListTile(
+            title: const Text('Demo: simulate offline'),
+            subtitle: const Text('Force cached mode without airplane mode'),
+            value: !state.isOnline,
+            onChanged: (v) => state.toggleDemoOffline(v),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          ),
         ),
         const Divider(height: 40),
 

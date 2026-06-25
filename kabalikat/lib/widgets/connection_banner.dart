@@ -18,20 +18,25 @@ class ConnectionBanner extends StatelessWidget {
         : online
             ? 'Online · add API key for live AI'
             : 'Offline · using cached lessons';
-    return Container(
-      width: double.infinity,
-      color: color,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      child: Row(
-        children: [
-          Icon(online ? Icons.wifi : Icons.wifi_off,
-              size: 16, color: Colors.white),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(label,
-                style: const TextStyle(color: Colors.white, fontSize: 12)),
-          ),
-        ],
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+      child: Container(
+        decoration: BoxDecoration(
+          color: color.withAlpha(51),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: color.withAlpha(128)),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(online ? Icons.wifi : Icons.wifi_off,
+                size: 16, color: color),
+            const SizedBox(width: 8),
+            Text(label,
+                style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600)),
+          ],
+        ),
       ),
     );
   }

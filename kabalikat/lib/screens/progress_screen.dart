@@ -35,8 +35,9 @@ class ProgressScreen extends StatelessWidget {
                   LinearProgressIndicator(
                     value: state.overallMastery,
                     minHeight: 12,
-                    backgroundColor: Colors.white12,
-                    color: kAccent,
+                    backgroundColor: kBg,
+                    color: kPrimary,
+                    borderRadius: BorderRadius.circular(6),
                   ),
                   const SizedBox(height: 8),
                   Text('${(state.overallMastery * 100).round()}%',
@@ -71,8 +72,9 @@ class ProgressScreen extends StatelessWidget {
                     const SizedBox(height: 4),
                     LinearProgressIndicator(
                       value: e.value,
-                      backgroundColor: Colors.white12,
+                      backgroundColor: kSurface,
                       color: kPrimary,
+                      borderRadius: BorderRadius.circular(4),
                     ),
                   ],
                 ),

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/student_profile.dart';
+import '../models/study_deck.dart';
 
 /// Thin wrapper around SharedPreferences for profile, mastery, settings.
 class StorageService {
@@ -10,6 +11,7 @@ class StorageService {
   static const _kProfile = 'profile';
   static const _kMastery = 'mastery'; // Map<topic, double 0..1>
   static const _kApiKey = 'api_key';
+  static const _kDecks = 'decks';
 
   Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
@@ -44,5 +46,29 @@ class StorageService {
     } else {
       await _prefs.setString(_kApiKey, key);
     }
+  }
+
+  // ---- Decks ----
+  List<StudyDeck> loadDecks() {
+    final raw = _prefs.getStringList(_kDecks);
+    if (raw == null) return [];
+    return raw.map((e) => StudyDeck.fromJson(jsonDecode(e))).toList();
+  }
+
+  Future<void> saveDeck(StudyDeck deck) async {
+    final decks = loadDecks();
+    final index = decks.indexWhere((d) => d.id == deck.id);
+    if (index >= 0) {
+      decks[index] = deck;
+    } else {
+      decks.add(deck);
+    }
+    await _prefs.setStringList(_kDecks, decks.map((d) => jsonEncode(d.toJson())).toList());
+  }
+
+  Future<void> deleteDeck(String id) async {
+    final decks = loadDecks();
+    decks.removeWhere((d) => d.id == id);
+    await _prefs.setStringList(_kDecks, decks.map((d) => jsonEncode(d.toJson())).toList());
   }
 }
