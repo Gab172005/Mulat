@@ -16,37 +16,14 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> {
   final _input = TextEditingController();
   final _scroll = ScrollController();
-  final List<ChatMessage> _messages = [];
-  bool _thinking = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _messages.add(ChatMessage(
-      text:
-          'Kumusta! Ako si Kabalikat. Magtanong ka lang — Math, Science, English, kahit ano. '
-          'Try: "Explain photosynthesis" o "Paano mag-add ng fractions?"',
-      fromUser: false,
-    ));
-  }
 
   Future<void> _send() async {
     final q = _input.text.trim();
-    if (q.isEmpty || _thinking) return;
     final state = context.read<AppState>();
-    setState(() {
-      _messages.add(ChatMessage(text: q, fromUser: true));
-      _input.clear();
-      _thinking = true;
-    });
+    if (q.isEmpty || state.tutorThinking) return;
+    _input.clear();
     _jump();
-
-    final reply = await state.ai.tutor(q, state.profile);
-    setState(() {
-      _messages.add(ChatMessage(
-          text: reply.text, fromUser: false, offline: reply.offline));
-      _thinking = false;
-    });
+    await state.askTutor(q); // adds turn to memory + persists + calls AI
     _jump();
   }
 
@@ -59,21 +36,39 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
+  /// Greeting is rendered live (never stored), so it always matches the
+  /// learner's current language and name — and is never sent to the model.
+  String _greeting(BuildContext context, AppState state) {
+    final base = '__tutor_greeting__'.tr(context);
+    final name = state.profile.name.trim();
+    if (name.isEmpty) return base;
+    return base
+        .replaceFirst('Hi!', 'Hi, $name!')
+        .replaceFirst('Kumusta!', 'Kumusta, $name!');
+  }
+
   @override
   Widget build(BuildContext context) {
+    final state = context.watch<AppState>();
+    final messages = <ChatMessage>[
+      ChatMessage(text: _greeting(context, state), fromUser: false),
+      ...state.chat,
+    ];
+
     return Column(
       children: [
         Expanded(
           child: ListView.builder(
             controller: _scroll,
             padding: const EdgeInsets.all(16),
-            itemCount: _messages.length + (_thinking ? 1 : 0),
+            itemCount: messages.length + (state.tutorThinking ? 1 : 0),
             itemBuilder: (context, i) {
-              if (_thinking && i == _messages.length) {
+              if (state.tutorThinking && i == messages.length) {
                 return _Bubble(
-                    fromUser: false, child: Text('...nag-iisip si Kabalikat'.tr(context)));
+                    fromUser: false,
+                    child: Text('...nag-iisip si Kabalikat'.tr(context)));
               }
-              final m = _messages[i];
+              final m = messages[i];
               return _Bubble(
                 fromUser: m.fromUser,
                 child: Column(

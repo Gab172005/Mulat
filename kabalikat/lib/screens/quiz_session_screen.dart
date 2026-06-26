@@ -40,6 +40,10 @@ class _QuizSessionScreenState extends State<QuizSessionScreen> {
         _selected = null;
       });
     } else {
+      // Session finished — record the score so spaced repetition can
+      // schedule the next review of this deck (adaptive forgetting curve).
+      final pct = (_correct / _quizzes.length * 100).round();
+      context.read<AppState>().recordReviewSession(widget.deck.title, pct);
       setState(() => _sessionDone = true);
     }
   }

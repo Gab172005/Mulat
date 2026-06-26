@@ -96,6 +96,126 @@ const Map<String, Map<AppLanguage, String>> _translations = {
     AppLanguage.filipino: 'Magtanong...',
     AppLanguage.taglish: 'Magtanong / Ask...',
   },
+  '__tutor_greeting__': {
+    AppLanguage.english:
+        'Hi! I\'m Kabalikat, your study buddy. Ask me anything — Math, Science, English, anything. Try: "Explain photosynthesis" or "How do I add fractions?"',
+    AppLanguage.filipino:
+        'Kumusta! Ako si Kabalikat, ang iyong study buddy. Magtanong ka lang — Math, Science, English, kahit ano. Subukan: "Ipaliwanag ang potosintesis" o "Paano magdagdag ng praksyon?"',
+    AppLanguage.taglish:
+        'Kumusta! Ako si Kabalikat, ang study buddy mo. Magtanong ka lang — Math, Science, English, kahit ano. Try: "Explain photosynthesis" o "Paano mag-add ng fractions?"',
+  },
+  'Clear chat': {
+    AppLanguage.english: 'Clear chat',
+    AppLanguage.filipino: 'I-clear ang chat',
+    AppLanguage.taglish: 'Clear chat',
+  },
+  'Review due': {
+    AppLanguage.english: 'Review due',
+    AppLanguage.filipino: 'Oras nang i-review',
+    AppLanguage.taglish: 'Review due',
+  },
+  'Mastered': {
+    AppLanguage.english: 'Mastered',
+    AppLanguage.filipino: 'Napag-aralan na',
+    AppLanguage.taglish: 'Mastered',
+  },
+  'Due for review': {
+    AppLanguage.english: 'Due for review',
+    AppLanguage.filipino: 'Para i-review',
+    AppLanguage.taglish: 'Due for review',
+  },
+  'No practice quizzes yet': {
+    AppLanguage.english: 'No practice quizzes yet',
+    AppLanguage.filipino: 'Wala pang practice quizzes',
+    AppLanguage.taglish: 'Wala pang practice quizzes',
+  },
+  'Upload a document in the Decks tab to generate practice quizzes.': {
+    AppLanguage.english:
+        'Upload a document in the Decks tab to generate practice quizzes.',
+    AppLanguage.filipino:
+        'Mag-upload ng dokumento sa Decks tab para gumawa ng practice quizzes.',
+    AppLanguage.taglish:
+        'Mag-upload ng document sa Decks tab para mag-generate ng practice quizzes.',
+  },
+  'See results': {
+    AppLanguage.english: 'See results',
+    AppLanguage.filipino: 'Tingnan ang resulta',
+    AppLanguage.taglish: 'See results',
+  },
+  'Back to Practice': {
+    AppLanguage.english: 'Back to Practice',
+    AppLanguage.filipino: 'Bumalik sa Practice',
+    AppLanguage.taglish: 'Back to Practice',
+  },
+  'Try again': {
+    AppLanguage.english: 'Try again',
+    AppLanguage.filipino: 'Subukan ulit',
+    AppLanguage.taglish: 'Try again',
+  },
+  'This deck has no flashcards.': {
+    AppLanguage.english: 'This deck has no flashcards.',
+    AppLanguage.filipino: 'Walang flashcard ang deck na ito.',
+    AppLanguage.taglish: 'Walang flashcards ang deck na ito.',
+  },
+
+  // Settings (extra)
+  'Your name': {
+    AppLanguage.english: 'Your name',
+    AppLanguage.filipino: 'Iyong pangalan',
+    AppLanguage.taglish: 'Your name',
+  },
+  'Update': {
+    AppLanguage.english: 'Update',
+    AppLanguage.filipino: 'I-update',
+    AppLanguage.taglish: 'Update',
+  },
+  'AI status': {
+    AppLanguage.english: 'AI status',
+    AppLanguage.filipino: 'Katayuan ng AI',
+    AppLanguage.taglish: 'AI status',
+  },
+  'On-device AI (Ollama)': {
+    AppLanguage.english: 'On-device AI (Ollama)',
+    AppLanguage.filipino: 'On-device AI (Ollama)',
+    AppLanguage.taglish: 'On-device AI (Ollama)',
+  },
+  'Runs offline on a local Ollama server using the custom "kabalikat" model. No internet or API key needed.':
+      {
+    AppLanguage.english:
+        'Runs offline on a local Ollama server using the custom "kabalikat" model. No internet or API key needed.',
+    AppLanguage.filipino:
+        'Tumatakbo offline gamit ang lokal na Ollama server at ang custom na "kabalikat" model. Hindi kailangan ng internet o API key.',
+    AppLanguage.taglish:
+        'Nag-run offline gamit ang local Ollama server at ang custom na "kabalikat" model. No internet o API key needed.',
+  },
+  'Reset progress': {
+    AppLanguage.english: 'Reset progress',
+    AppLanguage.filipino: 'I-reset ang progreso',
+    AppLanguage.taglish: 'Reset progress',
+  },
+  'Clears practice mastery, review schedule, and chat history.': {
+    AppLanguage.english:
+        'Clears practice mastery, review schedule, and chat history.',
+    AppLanguage.filipino:
+        'Buburahin ang mastery, iskedyul ng review, at kasaysayan ng chat.',
+    AppLanguage.taglish:
+        'Cle-clear ang mastery, review schedule, at chat history.',
+  },
+  'Reset': {
+    AppLanguage.english: 'Reset',
+    AppLanguage.filipino: 'I-reset',
+    AppLanguage.taglish: 'Reset',
+  },
+  'Progress reset': {
+    AppLanguage.english: 'Progress reset',
+    AppLanguage.filipino: 'Na-reset ang progreso',
+    AppLanguage.taglish: 'Progress reset',
+  },
+  'Name updated': {
+    AppLanguage.english: 'Name updated',
+    AppLanguage.filipino: 'Na-update ang pangalan',
+    AppLanguage.taglish: 'Name updated',
+  },
 
   // Practice
   'Next question': {

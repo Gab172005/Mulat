@@ -3,6 +3,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/student_profile.dart';
 import '../models/study_deck.dart';
+import '../models/chat_message.dart';
+import '../models/review_state.dart';
 
 /// Thin wrapper around SharedPreferences for profile, mastery, settings.
 class StorageService {
@@ -12,6 +14,8 @@ class StorageService {
   static const _kMastery = 'mastery'; // Map<topic, double 0..1>
   static const _kApiKey = 'api_key';
   static const _kDecks = 'decks';
+  static const _kChat = 'chat_history'; // List<ChatMessage>
+  static const _kReviews = 'reviews'; // Map<deckTitle, ReviewState>
 
   Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
@@ -70,5 +74,45 @@ class StorageService {
     final decks = loadDecks();
     decks.removeWhere((d) => d.id == id);
     await _prefs.setStringList(_kDecks, decks.map((d) => jsonEncode(d.toJson())).toList());
+  }
+
+  // ---- Chat history (lets the tutor remember the conversation) ----
+  List<ChatMessage> loadChat() {
+    final raw = _prefs.getStringList(_kChat);
+    if (raw == null) return [];
+    return raw.map((e) => ChatMessage.fromJson(jsonDecode(e))).toList();
+  }
+
+  Future<void> saveChat(List<ChatMessage> messages) {
+    // Keep storage bounded — only persist the most recent 60 turns.
+    final trimmed =
+        messages.length > 60 ? messages.sublist(messages.length - 60) : messages;
+    return _prefs.setStringList(
+      _kChat,
+      trimmed.map((m) => jsonEncode(m.toJson())).toList(),
+    );
+  }
+
+  Future<void> clearChat() => _prefs.remove(_kChat);
+
+  // ---- Spaced-repetition review schedule (per deck) ----
+  Map<String, ReviewState> loadReviews() {
+    final raw = _prefs.getString(_kReviews);
+    if (raw == null) return {};
+    final m = jsonDecode(raw) as Map<String, dynamic>;
+    return m.map((k, v) => MapEntry(k, ReviewState.fromJson(v)));
+  }
+
+  Future<void> saveReviews(Map<String, ReviewState> reviews) =>
+      _prefs.setString(
+        _kReviews,
+        jsonEncode(reviews.map((k, v) => MapEntry(k, v.toJson()))),
+      );
+
+  // ---- Demo / progress reset helpers ----
+  Future<void> clearProgress() async {
+    await _prefs.remove(_kMastery);
+    await _prefs.remove(_kReviews);
+    await _prefs.remove(_kChat);
   }
 }

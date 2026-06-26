@@ -48,14 +48,38 @@ class ProgressScreen extends StatelessWidget {
               ),
             ),
           ),
+          if (state.dueDeckTitles.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: kAccent.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: kAccent.withValues(alpha: 0.4)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.bolt, color: kAccent, size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '${state.dueDeckTitles.length} ${'Due for review'.tr(context).toLowerCase()}',
+                      style: const TextStyle(fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 20),
           Text('By topic'.tr(context),
               style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
           const SizedBox(height: 10),
           if (entries.isEmpty)
-            const Text(
-                'Wala pang practice. Pumunta sa Practice tab para magsimula.',
-                style: TextStyle(color: Colors.white54))
+            Text(
+                'Wala pang practice. Pumunta sa Practice tab para magsimula.'
+                    .tr(context),
+                style: const TextStyle(color: Colors.white54))
           else
             for (final e in entries)
               Padding(

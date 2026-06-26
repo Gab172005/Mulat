@@ -68,11 +68,17 @@ class _DecksScreenState extends State<DecksScreen> {
     final docService = DocumentService();
     final appState = context.read<AppState>();
 
-    final text = await docService.pickAndExtractPdf();
-    if (text == null || text.isEmpty) {
+    final doc = await docService.pickPdf();
+    if (doc == null) return; // user cancelled
+
+    if (!doc.hasText) {
+      // Scanned/image-only PDF — guide the user to the on-device OCR path.
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not extract text from PDF or user cancelled.')),
+          const SnackBar(
+            content: Text(
+                'No selectable text in this PDF — try "Photograph your notes" to use on-device OCR.'),
+          ),
         );
       }
       return;
@@ -84,10 +90,7 @@ class _DecksScreenState extends State<DecksScreen> {
     });
 
     try {
-      final deck = await _generateDeck(
-        text,
-        'Generated Deck ${DateTime.now().toLocal().toString().split('.')[0]}',
-      );
+      final deck = await _generateDeck(doc.text, doc.title);
       await appState.addDeck(deck);
       if (mounted) setState(() => _showUploadView = false);
     } catch (e) {
