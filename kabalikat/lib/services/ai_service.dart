@@ -114,59 +114,252 @@ class AiService {
   // ------------------------------------------------------------- DECK GEN
   Future<StudyDeck> generateStudyDeck(String documentText, String title) async {
     // Truncate document text if too long for local model context
-    final maxLength = 6000;
+    const maxLength = 6000;
     final text = documentText.length > maxLength
         ? documentText.substring(0, maxLength)
         : documentText;
 
-    final prompt = '''
-You are a helpful study assistant. Create a study deck from the following document.
-Return ONLY valid JSON with no markdown formatting. The JSON must have two keys: "flashcards" and "quizzes".
-"flashcards" is an array of objects with "front" (question/concept) and "back" (answer/definition).
-"quizzes" is an array of objects with "question", "options" (array of 4 strings), and "answerIndex" (0-3).
+    final flashcardsPrompt = '''
+You are an expert study assistant proficient in Filipino. Your task is to extract facts ONLY from the provided document, translate the content, and explain it in clear Filipino.
+ALL flashcard questions and answers MUST be written in Filipino.
+CRITICAL REQUIREMENT: You MUST generate AT LEAST 10 flashcards.
+Return ONLY valid JSON. Do not include markdown formatting like ```json.
+The JSON must follow this exact structure:
+{
+  "flashcards": [
+    {"front": "[Question in Filipino]", "back": "[Answer in Filipino]"}
+  ]
+}
 
 Document Text:
 $text
 ''';
 
-    // Use 127.0.0.1 for Android so adb reverse can route it to the host even when Wi-Fi is completely disabled.
-    final host = Platform.isAndroid ? '127.0.0.1' : 'localhost';
-    try {
-      final res = await http.post(
-        Uri.parse('http://$host:11434/api/generate'),
-        headers: {'content-type': 'application/json'},
-        body: jsonEncode({
-          'model': 'llama3.2:latest',
-          'prompt': prompt,
-          'stream': false,
-          'format': 'json',
-        }),
-      );
+    final quizzesPrompt = '''
+You are an expert study assistant proficient in Filipino. Your task is to extract facts ONLY from the provided document, translate the content, and explain it in clear Filipino.
+ALL quiz questions and choices MUST be written in Filipino.
+CRITICAL REQUIREMENT: You MUST generate AT LEAST 10 quizzes.
+Return ONLY valid JSON. Do not include markdown formatting like ```json.
+The JSON must follow this exact structure:
+{
+  "quizzes": [
+    {"question": "[Question in Filipino]", "options": ["[Option A]", "[Option B]", "[Option C]", "[Option D]"], "answerIndex": 0}
+  ]
+}
 
-      if (res.statusCode != 200) {
-        throw Exception('Ollama error ${res.statusCode}');
+Document Text:
+$text
+''';
+
+    Future<String> getResponse(String prompt) async {
+      if (_canUseLive) {
+        try {
+          return await _callLlm(prompt, maxTokens: 2000);
+        } catch (_) {}
       }
-
-      final data = jsonDecode(res.body);
-      final responseText = data['response'] as String;
-
-      try {
-        final jsonMap = jsonDecode(responseText);
-        return StudyDeck.fromJson({
-          'title': title,
-          'flashcards': jsonMap['flashcards'] ?? [],
-          'quizzes': jsonMap['quizzes'] ?? [],
-        });
-      } catch (e) {
-        throw Exception('Failed to parse Study Deck JSON from Ollama: $e\\nResponse was: $responseText');
-      }
-    } catch (e) {
-      rethrow;
+      return await _generateWithOllama(prompt);
     }
+
+    List<dynamic> flashcardsList = [];
+    try {
+      final responseText = await getResponse(flashcardsPrompt);
+      flashcardsList = _parseFlashcardsRobustly(responseText);
+    } catch (e) {
+      throw Exception('Failed to generate/parse Flashcards: $e');
+    }
+
+    List<dynamic> quizzesList = [];
+    try {
+      final responseText = await getResponse(quizzesPrompt);
+      quizzesList = _parseQuizzesRobustly(responseText);
+    } catch (e) {
+      throw Exception('Failed to generate/parse Quizzes: $e');
+    }
+
+    return StudyDeck.fromJson({
+      'title': title,
+      'flashcards': flashcardsList,
+      'quizzes': quizzesList,
+    });
+  }
+
+  List<dynamic> _parseFlashcardsRobustly(String text) {
+    try {
+      var cleanText = text.trim();
+      if (cleanText.startsWith('```json')) {
+        cleanText = cleanText.substring(7);
+      } else if (cleanText.startsWith('```')) {
+        cleanText = cleanText.substring(3);
+      }
+      if (cleanText.endsWith('```')) {
+        cleanText = cleanText.substring(0, cleanText.length - 3);
+      }
+      cleanText = cleanText.trim();
+      final map = jsonDecode(cleanText);
+      if (map['flashcards'] is List) return map['flashcards'];
+    } catch (_) {}
+    
+    String fixed = text.trim();
+    int quotes = 0;
+    bool escaped = false;
+    for (int i = 0; i < fixed.length; i++) {
+      if (fixed[i] == '\\') {
+        escaped = !escaped;
+      } else if (fixed[i] == '"' && !escaped) {
+        quotes++;
+      } else {
+        escaped = false;
+      }
+    }
+    if (quotes % 2 != 0) {
+      fixed += '"';
+    }
+    
+    final closings = ['', '}', ']}', '}]}', ']}]}', '}}]}'];
+    for (final close in closings) {
+      try {
+        var cText = (fixed + close).trim();
+        if (cText.startsWith('```json')) {
+          cText = cText.substring(7);
+        } else if (cText.startsWith('```')) {
+          cText = cText.substring(3);
+        }
+        if (cText.endsWith('```')) {
+          cText = cText.substring(0, cText.length - 3);
+        }
+        final map = jsonDecode(cText.trim());
+        if (map['flashcards'] is List) {
+          return map['flashcards'];
+        }
+      } catch (_) {}
+    }
+    
+    List<dynamic> fallback = [];
+    final regExp = RegExp(r'\{[^}]*\}');
+    final matches = regExp.allMatches(text);
+    for (final m in matches) {
+      try {
+        final obj = jsonDecode(m.group(0)!);
+        if (obj is Map && obj.containsKey('front') && obj.containsKey('back')) {
+          fallback.add(obj);
+        }
+      } catch (_) {}
+    }
+    return fallback;
+  }
+
+  List<dynamic> _parseQuizzesRobustly(String text) {
+    try {
+      var cleanText = text.trim();
+      if (cleanText.startsWith('```json')) {
+        cleanText = cleanText.substring(7);
+      } else if (cleanText.startsWith('```')) {
+        cleanText = cleanText.substring(3);
+      }
+      if (cleanText.endsWith('```')) {
+        cleanText = cleanText.substring(0, cleanText.length - 3);
+      }
+      cleanText = cleanText.trim();
+      final map = jsonDecode(cleanText);
+      if (map['quizzes'] is List) return map['quizzes'];
+    } catch (_) {}
+    
+    String fixed = text.trim();
+    int quotes = 0;
+    bool escaped = false;
+    for (int i = 0; i < fixed.length; i++) {
+      if (fixed[i] == '\\') {
+        escaped = !escaped;
+      } else if (fixed[i] == '"' && !escaped) {
+        quotes++;
+      } else {
+        escaped = false;
+      }
+    }
+    if (quotes % 2 != 0) {
+      fixed += '"';
+    }
+    
+    final closings = ['', '}', ']}', '}]}', ']}]}', '}}]}'];
+    for (final close in closings) {
+      try {
+        var cText = (fixed + close).trim();
+        if (cText.startsWith('```json')) {
+          cText = cText.substring(7);
+        } else if (cText.startsWith('```')) {
+          cText = cText.substring(3);
+        }
+        if (cText.endsWith('```')) {
+          cText = cText.substring(0, cText.length - 3);
+        }
+        final map = jsonDecode(cText.trim());
+        if (map['quizzes'] is List) {
+          return map['quizzes'];
+        }
+      } catch (_) {}
+    }
+    
+    List<dynamic> fallback = [];
+    final regExp = RegExp(r'\{[^}]*\}');
+    final matches = regExp.allMatches(text);
+    for (final m in matches) {
+      try {
+        final obj = jsonDecode(m.group(0)!);
+        if (obj is Map && obj.containsKey('question') && obj.containsKey('options')) {
+          fallback.add(obj);
+        }
+      } catch (_) {}
+    }
+    return fallback;
+  }
+
+  Future<String> _generateWithOllama(String prompt) async {
+    final hosts = Platform.isAndroid ? ['127.0.0.1', '10.0.2.2'] : ['localhost'];
+    http.Response? res;
+    dynamic lastError;
+
+    for (final host in hosts) {
+      try {
+        final candidate = await http.post(
+          Uri.parse('http://$host:11434/api/generate'),
+          headers: {'content-type': 'application/json'},
+          body: jsonEncode({
+            'model': 'qwen2.5:0.5b',
+            'prompt': prompt,
+            'stream': false,
+            'format': 'json',
+            'options': {
+              'temperature': 0.1,
+              'top_p': 0.9,
+              'num_predict': 4096,
+              'num_ctx': 8192,
+            },
+          }),
+        );
+        if (candidate.statusCode == 200) {
+          res = candidate;
+          break;
+        } else {
+          lastError = Exception('Ollama error ${candidate.statusCode}');
+        }
+      } catch (e) {
+        lastError = e;
+      }
+    }
+
+    if (res == null) {
+      if (lastError != null) {
+        throw lastError;
+      }
+      throw Exception('Ollama connection failed');
+    }
+
+    final data = jsonDecode(res.body);
+    return data['response'] as String;
   }
 
   // ------------------------------------------------------------ LLM CALL
-  Future<String> _callLlm(String prompt) async {
+  Future<String> _callLlm(String prompt, {int maxTokens = 600}) async {
     final res = await http.post(
       Uri.parse(_baseUrl),
       headers: {
@@ -176,7 +369,7 @@ $text
       },
       body: jsonEncode({
         'model': _model,
-        'max_tokens': 600,
+        'max_tokens': maxTokens,
         'messages': [
           {'role': 'user', 'content': prompt}
         ],

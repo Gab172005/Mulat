@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../services/l10n_service.dart';
 
 import '../state/app_state.dart';
 import '../models/student_profile.dart';
@@ -21,12 +22,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        const Text('Settings',
-            style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+        Text('Settings'.tr(context),
+            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
         const SizedBox(height: 20),
 
         // Language
-        const Text('Language'),
+        Text('Language'.tr(context)),
         const SizedBox(height: 8),
         Wrap(
           spacing: 8,
@@ -42,7 +43,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         const SizedBox(height: 20),
 
         // Grade
-        const Text('Grade level'),
+        Text('Grade level'.tr(context)),
         const SizedBox(height: 8),
         DropdownButton<int>(
           value: state.profile.grade,
@@ -63,8 +64,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             border: Border.all(color: Colors.white12),
           ),
           child: SwitchListTile(
-            title: const Text('Demo: simulate offline'),
-            subtitle: const Text('Force cached mode without airplane mode'),
+            title: Text('Demo: simulate offline'.tr(context)),
+            subtitle: Text('Force cached mode without airplane mode'.tr(context)),
             value: !state.isOnline,
             onChanged: (v) => state.toggleDemoOffline(v),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -73,19 +74,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
         const Divider(height: 40),
 
         // Live AI key
-        const Text('Live AI (optional)'),
+        Text('Live AI (optional)'.tr(context)),
         const SizedBox(height: 4),
         Text(
           state.hasApiKey
-              ? 'API key saved — live AI active when online.'
-              : 'No key set — app uses cached content only.',
+              ? 'API key saved — live AI active when online.'.tr(context)
+              : 'No key set — app uses cached content only.'.tr(context),
           style: const TextStyle(color: Colors.white54, fontSize: 12),
         ),
         const SizedBox(height: 8),
         TextField(
           controller: _key,
           obscureText: true,
-          decoration: const InputDecoration(hintText: 'Paste API key'),
+          decoration: InputDecoration(hintText: 'Paste API key'.tr(context)),
         ),
         const SizedBox(height: 8),
         Row(
@@ -95,15 +96,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 state.setApiKey(_key.text.trim());
                 _key.clear();
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('API key saved')),
+                  SnackBar(content: Text('API key saved'.tr(context))),
                 );
               },
-              child: const Text('Save key'),
+              child: Text('Save key'.tr(context)),
             ),
             const SizedBox(width: 8),
             TextButton(
               onPressed: () => state.setApiKey(null),
-              child: const Text('Clear'),
+              child: Text('Clear'.tr(context)),
             ),
           ],
         ),

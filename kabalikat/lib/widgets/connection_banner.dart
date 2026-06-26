@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../state/app_state.dart';
+import '../services/l10n_service.dart';
 
 /// Small status strip showing online/offline + whether live AI is active.
 class ConnectionBanner extends StatelessWidget {
@@ -14,10 +15,10 @@ class ConnectionBanner extends StatelessWidget {
     final live = online && state.hasApiKey;
     final color = online ? const Color(0xFF1F7A4D) : const Color(0xFF7A3B1F);
     final label = live
-        ? 'Online · Live AI tutor'
+        ? 'Online · Live AI tutor'.tr(context)
         : online
-            ? 'Online · add API key for live AI'
-            : 'Offline · using cached lessons';
+            ? 'Online · add API key for live AI'.tr(context)
+            : 'Offline · using cached lessons'.tr(context);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
       child: Container(

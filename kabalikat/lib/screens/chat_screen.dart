@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../services/l10n_service.dart';
 
 import '../state/app_state.dart';
 import '../models/chat_message.dart';
@@ -69,8 +70,8 @@ class _ChatScreenState extends State<ChatScreen> {
             itemCount: _messages.length + (_thinking ? 1 : 0),
             itemBuilder: (context, i) {
               if (_thinking && i == _messages.length) {
-                return const _Bubble(
-                    fromUser: false, child: Text('...nag-iisip si Kabalikat'));
+                return _Bubble(
+                    fromUser: false, child: Text('...nag-iisip si Kabalikat'.tr(context)));
               }
               final m = _messages[i];
               return _Bubble(
@@ -80,10 +81,10 @@ class _ChatScreenState extends State<ChatScreen> {
                   children: [
                     Text(m.text),
                     if (m.offline)
-                      const Padding(
-                        padding: EdgeInsets.only(top: 6),
-                        child: Text('cached · offline',
-                            style: TextStyle(
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Text('cached · offline'.tr(context),
+                            style: const TextStyle(
                                 fontSize: 10, color: Colors.white54)),
                       ),
                   ],
@@ -101,7 +102,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   controller: _input,
                   onSubmitted: (_) => _send(),
                   decoration: InputDecoration(
-                    hintText: 'Ask anything...',
+                    hintText: 'Ask a question...'.tr(context),
                     suffixIcon: IconButton(
                       icon: const Icon(Icons.send, color: kPrimary),
                       onPressed: _send,

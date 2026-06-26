@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../services/l10n_service.dart';
 
 import '../state/app_state.dart';
 import '../models/student_profile.dart';
@@ -39,17 +40,17 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         color: Colors.white)),
               ),
               const SizedBox(height: 6),
-              const Text('Your AI study buddy — kahit walang signal.',
-                  style: TextStyle(color: Colors.white70)),
+              Text('Your AI study buddy — kahit walang signal.'.tr(context),
+                  style: const TextStyle(color: Colors.white70)),
               const SizedBox(height: 32),
-              const Text('Ano ang pangalan mo? / Your name'),
+              Text('Ano ang pangalan mo? / Your name'.tr(context)),
               const SizedBox(height: 8),
               TextField(
                 controller: _name,
                 decoration: const InputDecoration(hintText: 'Juan'),
               ),
               const SizedBox(height: 24),
-              const Text('Grade level'),
+              Text('Grade level'.tr(context)),
               const SizedBox(height: 8),
               DropdownButtonFormField<int>(
                 value: _grade,
@@ -60,7 +61,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 onChanged: (v) => setState(() => _grade = v ?? 7),
               ),
               const SizedBox(height: 24),
-              const Text('Wikang gagamitin / Language'),
+              Text('Wikang gagamitin / Language'.tr(context)),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
@@ -82,7 +83,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         _lang,
                       );
                 },
-                child: const Text('Simulan / Start'),
+                child: Text('Simulan / Start'.tr(context)),
               ),
             ],
           ),

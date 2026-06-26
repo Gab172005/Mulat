@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../services/l10n_service.dart';
 
 import '../models/study_deck.dart';
 import '../services/document_service.dart';
@@ -230,17 +231,17 @@ class _DecksScreenState extends State<DecksScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Study Decks'),
+        title: Text('Study Decks'.tr(context)),
       ),
       body: _isLoading
-          ? const Center(
+          ? Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  CircularProgressIndicator(),
-                  SizedBox(height: 16),
-                  Text('Reading document & generating flashcards...'),
-                  Text('This may take a moment on local AI.'),
+                  const CircularProgressIndicator(),
+                  const SizedBox(height: 16),
+                  Text('Reading document & generating flashcards...'.tr(context)),
+                  Text('This may take a moment on local AI.'.tr(context)),
                 ],
               ),
             )
@@ -273,7 +274,7 @@ class _DecksScreenState extends State<DecksScreen> {
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _isLoading ? null : () => setState(() => _showUploadView = true),
         icon: const Icon(Icons.add),
-        label: const Text('New Deck'),
+        label: Text('New Deck'.tr(context)),
       ),
     );
   }

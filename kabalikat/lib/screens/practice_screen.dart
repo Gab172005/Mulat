@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../services/l10n_service.dart';
 
 import '../state/app_state.dart';
 import '../models/student_profile.dart';
@@ -110,7 +111,7 @@ class _PracticeScreenState extends State<PracticeScreen> {
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: _load,
-                child: const Text('Next question'),
+                child: Text('Next question'.tr(context)),
               ),
             ),
             const SizedBox(height: 8),
@@ -180,8 +181,8 @@ class _Intro extends StatelessWidget {
           children: [
             const Icon(Icons.quiz_outlined, size: 64, color: kAccent),
             const SizedBox(height: 16),
-            const Text('Adaptive Practice',
-                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+            Text('Adaptive Practice'.tr(context),
+                style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             const Text(
               'Questions get easier or harder based on how you answer. '
@@ -190,7 +191,7 @@ class _Intro extends StatelessWidget {
               style: TextStyle(color: Colors.white70),
             ),
             const SizedBox(height: 24),
-            ElevatedButton(onPressed: onStart, child: const Text('Start practice')),
+            ElevatedButton(onPressed: onStart, child: Text('Start practice'.tr(context))),
           ],
         ),
       ),

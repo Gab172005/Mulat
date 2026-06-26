@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:kabalikat/models/student_profile.dart';
 import 'package:provider/provider.dart';
+import '../services/l10n_service.dart';
 
 import '../state/app_state.dart';
 import '../theme.dart';
@@ -30,7 +31,7 @@ class ProgressScreen extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Overall mastery'),
+                  Text('Overall mastery'.tr(context)),
                   const SizedBox(height: 10),
                   LinearProgressIndicator(
                     value: state.overallMastery,
@@ -48,8 +49,8 @@ class ProgressScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 20),
-          const Text('By topic',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+          Text('By topic'.tr(context),
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
           const SizedBox(height: 10),
           if (entries.isEmpty)
             const Text(

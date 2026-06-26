@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/study_deck.dart';
+import '../services/l10n_service.dart';
 
 class DeckViewScreen extends StatefulWidget {
   final StudyDeck deck;
@@ -38,20 +39,20 @@ class _DeckViewScreenState extends State<DeckViewScreen> {
         title: Text(widget.deck.title),
       ),
       body: widget.deck.flashcards.isEmpty && widget.deck.quizzes.isEmpty
-          ? const Center(child: Text('This deck is empty.'))
+          ? Center(child: Text('This deck is empty.'.tr(context)))
           : SingleChildScrollView(
               padding: const EdgeInsets.all(16.0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   if (widget.deck.flashcards.isNotEmpty) ...[
-                    Text('Flashcards', style: Theme.of(context).textTheme.titleLarge),
+                    Text('Flashcards'.tr(context), style: Theme.of(context).textTheme.titleLarge),
                     const SizedBox(height: 8),
                     _buildFlashcardView(),
                     const SizedBox(height: 24),
                   ],
                   if (widget.deck.quizzes.isNotEmpty) ...[
-                    Text('Microquizzes', style: Theme.of(context).textTheme.titleLarge),
+                    Text('Microquizzes'.tr(context), style: Theme.of(context).textTheme.titleLarge),
                     const SizedBox(height: 8),
                     ...widget.deck.quizzes.map((q) => _buildQuizCard(q)),
                   ],

@@ -51,8 +51,8 @@ class Flashcard {
 
   factory Flashcard.fromJson(Map<String, dynamic> json) {
     return Flashcard(
-      front: json['front'] as String,
-      back: json['back'] as String,
+      front: (json['front'] ?? json['question'] ?? '').toString(),
+      back: (json['back'] ?? json['answer'] ?? '').toString(),
     );
   }
 
@@ -76,10 +76,24 @@ class Microquiz {
   });
 
   factory Microquiz.fromJson(Map<String, dynamic> json) {
+    var rawOptions = json['options'];
+    List<String> optionsList = [];
+    if (rawOptions is List) {
+      optionsList = rawOptions.map((e) => e.toString()).toList();
+    }
+
+    var index = json['answerIndex'];
+    int parsedIndex = 0;
+    if (index is int) {
+      parsedIndex = index;
+    } else if (index is String) {
+      parsedIndex = int.tryParse(index) ?? 0;
+    }
+
     return Microquiz(
-      question: json['question'] as String,
-      options: List<String>.from(json['options']),
-      answerIndex: json['answerIndex'] as int,
+      question: (json['question'] ?? '').toString(),
+      options: optionsList,
+      answerIndex: parsedIndex,
     );
   }
 

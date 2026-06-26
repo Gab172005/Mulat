@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../services/l10n_service.dart';
 
 import '../widgets/connection_banner.dart';
 import 'chat_screen.dart';
@@ -39,12 +40,12 @@ class _HomeScreenState extends State<HomeScreen> {
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (i) => setState(() => _index = i),
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.chat_bubble_outline), label: 'Tutor'),
-          NavigationDestination(icon: Icon(Icons.quiz_outlined), label: 'Practice'),
-          NavigationDestination(icon: Icon(Icons.insights_outlined), label: 'Progress'),
-          NavigationDestination(icon: Icon(Icons.library_books), label: 'Decks'),
-          NavigationDestination(icon: Icon(Icons.settings_outlined), label: 'Settings'),
+        destinations: [
+          NavigationDestination(icon: const Icon(Icons.chat_bubble_outline), label: 'Tutor'.tr(context)),
+          NavigationDestination(icon: const Icon(Icons.quiz_outlined), label: 'Practice'.tr(context)),
+          NavigationDestination(icon: const Icon(Icons.insights_outlined), label: 'Progress'.tr(context)),
+          NavigationDestination(icon: const Icon(Icons.library_books), label: 'Decks'.tr(context)),
+          NavigationDestination(icon: const Icon(Icons.settings_outlined), label: 'Settings'.tr(context)),
         ],
       ),
     );
