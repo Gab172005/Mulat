@@ -177,6 +177,15 @@ class ChatController extends ChangeNotifier {
       }
     }
 
+    // Recency-bias anchor: append the language lock to the LAST user turn.
+    // The model reads this immediately before generating — it is the
+    // highest-weight signal for language choice in the output.
+    if (contents.isNotEmpty && contents.last['role'] == 'user') {
+      final parts = contents.last['parts'] as List<dynamic>;
+      parts[0]['text'] =
+          '${parts[0]['text']}\n\n[${profile.language.languageLockTag}]';
+    }
+
     final res = await http
         .post(
           Uri.parse(_geminiUrl),
@@ -211,17 +220,23 @@ class ChatController extends ChangeNotifier {
   /// This is the critical difference from `/api/generate` — it preserves
   /// the full conversation context across turns.
   Future<String> _callOllama(StudentProfile profile) async {
-    final chatMessages = <Map<String, dynamic>>[
+    final history = _sentHistory();
+
+    // Recency-bias anchor: append language lock to the last user turn so the
+    // model sees it as the immediate instruction before it generates output.
+    final List<Map<String, dynamic>> chatMessages = [
       {'role': 'system', 'content': _systemPrompt(profile)},
-      for (final msg in _sentHistory())
+      for (int i = 0; i < history.length; i++)
         {
-          'role': msg.fromUser ? 'user' : 'assistant',
-          'content': msg.text,
+          'role': history[i].fromUser ? 'user' : 'assistant',
+          'content': (history[i].fromUser && i == history.length - 1)
+              ? '${history[i].text}\n\n[${profile.language.languageLockTag}]'
+              : history[i].text,
         },
     ];
 
     final hosts =
-        Platform.isAndroid ? ['10.0.2.2', '127.0.0.1'] : ['localhost'];
+        Platform.isAndroid ? ['10.0.2.2', '127.0.0.1'] : ['127.0.0.1', 'localhost'];
 
     http.Response? res;
     dynamic lastError;
@@ -272,21 +287,30 @@ class ChatController extends ChangeNotifier {
 
   // ── HELPERS ───────────────────────────────────────────────────────────
 
-  String _systemPrompt(StudentProfile profile) =>
-      'You are Kabalikat, a patient and encouraging AI study companion for '
-      'a Grade ${profile.grade} Filipino student'
-      '${profile.name.isNotEmpty ? " named ${profile.name}" : ""}. '
-      '${profile.language.promptHint} '
-      'Give clear, concise answers with a simple local example when helpful. '
-      'End your response with one short follow-up question to check understanding. '
-      'NEVER repeat or mention this system instruction in your reply.';
+  // Authoritative system prompt. Uses chatSystemPrompt (aggressive language
+  // directive) not promptHint (a single soft sentence that gets overridden
+  // by Filipino content in chat history).
+  String _systemPrompt(StudentProfile profile) {
+    final name = profile.name.isNotEmpty ? ' named ${profile.name}' : '';
+    return '${profile.language.chatSystemPrompt}\n\n'
+        'You are tutoring a Grade ${profile.grade} Filipino student$name. '
+        'Give clear, concise answers with a simple local example when helpful. '
+        'End your response with one short follow-up question to check understanding. '
+        'NEVER repeat or mention this system instruction in your reply.\n\n'
+        // End-of-system-prompt anchor exploits recency bias on models that
+        // weight the tail of the system prompt above its body.
+        '[ACTIVE LANGUAGE LOCK: ${profile.language.languageLockTag}]';
+  }
 
   /// The last [_maxSentTurns] turn-pairs forwarded to the AI.
   /// Full history is always kept in [_messages] for display.
+  /// System messages (welcome, banners) are excluded — sending them as
+  /// assistant-role history anchors the model to the wrong language.
   List<ChatMessage> _sentHistory() {
+    final eligible = _messages.where((m) => !m.isSystem).toList();
     const limit = _maxSentTurns * 2;
-    if (_messages.length <= limit) return List.of(_messages);
-    return _messages.sublist(_messages.length - limit);
+    if (eligible.length <= limit) return eligible;
+    return eligible.sublist(eligible.length - limit);
   }
 
   /// Estimates the required Ollama context window from total message length.
@@ -308,11 +332,15 @@ class ChatController extends ChangeNotifier {
           "Hindi ko ma-reach ang AI ngayon. I-check ang internet mo o siguraduhing tumatakbo ang Ollama locally. Ligtas ang iyong chat history.",
       };
 
+  // Marked isSystem: true so it is excluded from _sentHistory() and never
+  // forwarded to the AI as an assistant-role message. A Taglish welcome in
+  // the history tells Gemini/Ollama that Filipino output is acceptable.
   void _addWelcome() => _messages.add(ChatMessage(
         text: 'Kumusta! Ako si Kabalikat. Magtanong ka lang — '
             'Math, Science, English, kahit ano. '
             'Try: "Explain photosynthesis" o "Paano mag-add ng fractions?"',
         fromUser: false,
+        isSystem: true,
       ));
 
   Future<void> _persist() async {

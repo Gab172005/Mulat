@@ -198,13 +198,13 @@ class HybridStudyContentRepository implements StudyContentRepository {
     final model = GenerativeModel(
       model: _kGeminiModel,
       apiKey: _storage.apiKey!,
+      // systemInstruction is the authoritative language directive. It runs in
+      // Gemini's dedicated system role — higher priority than user content and
+      // NOT overridden by Filipino text in the document or conversation.
+      systemInstruction: Content.system(language.contentGenerationSystemPrompt),
       generationConfig: GenerationConfig(
         maxOutputTokens: 4096,
-        // Low temperature for factual, consistent study content.
-        // Enough entropy for varied phrasing but avoids hallucination.
         temperature: 0.2,
-        // API-level JSON enforcement — the model cannot produce invalid JSON.
-        // Combined with our prompt instructions this gives near-100% parse rate.
         responseMimeType: 'application/json',
       ),
     );

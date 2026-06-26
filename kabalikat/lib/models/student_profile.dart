@@ -68,6 +68,76 @@ Mag-Taglish ka PALAGI sa bawat item — huwag kalimutan!''',
       'REMINDER: Ang bawat item ay dapat TAGLISH — huwag kalimutan!',
   };
 
+  // ── CHAT SYSTEM PROMPTS ────────────────────────────────────────────
+  // Used by ChatController. Much more aggressive than promptHint because
+  // chat history frequently contains Filipino student text that causes
+  // small models to anchor to the wrong language.
+
+  /// Authoritative system prompt for the chat controller. Names the
+  /// forbidden language explicitly and survives contaminated history.
+  String get chatSystemPrompt => switch (this) {
+    AppLanguage.english =>
+      'You are Kabalikat, a native English academic tutor. '
+      'Your thoughts, reasoning, and ALL outputs are strictly constrained to the English language. '
+      'CRITICAL DIRECTIVE: Your active language setting is PURE ENGLISH. '
+      'You MUST respond 100% in grammatically correct English. '
+      'ABSOLUTELY DO NOT use Tagalog, Filipino, or Taglish words or expressions '
+      '(such as "ano", "ba", "na", "mga", "po", "naman", "kaya", "pero", "siya", "ito", '
+      '"ang", "ng", "sa", "at", "hindi", "pwede", etc.) '
+      'even if the chat history or student question is written in Filipino. '
+      'If the student writes in Filipino, UNDERSTAND their message but reply ENTIRELY in English.',
+
+    AppLanguage.filipino =>
+      'Ikaw si Kabalikat, isang akademikong guro na Filipino. '
+      'Ang iyong mga kaisipan, pag-iisip, at LAHAT ng output ay strictly PURONG FILIPINO. '
+      'MAHALAGANG DIREKTIBA: Ang iyong aktibong setting ng wika ay PURONG FILIPINO. '
+      'DAPAT kang sumagot ng 100% sa wastong Filipino. '
+      'HUWAG KAILANMAN gumamit ng English na salita, parirala, o istruktura ng pangungusap '
+      'kahit na ang kasaysayan ng chat o tanong ng estudyante ay nasa English. '
+      'Kung ang estudyante ay sumusulat sa English, INTINDIHIN ang mensahe '
+      'ngunit sumagot ng GANAP sa Filipino.',
+
+    AppLanguage.taglish =>
+      'You are Kabalikat, a friendly Filipino academic tutor who naturally speaks Taglish. '
+      'Respond in friendly Taglish (mixed Filipino and English), the way a Filipino tutor speaks naturally. '
+      'Use Filipino sentence structure with English technical terms. '
+      'This is NOT pure English and NOT pure Filipino — it is natural Filipino code-switching.',
+  };
+
+  /// Short inline language lock tag appended to the last user message to
+  /// exploit recency bias in both Gemini and Ollama attention.
+  String get languageLockTag => switch (this) {
+    AppLanguage.english => 'RESPOND IN PURE ENGLISH ONLY.',
+    AppLanguage.filipino => 'SUMAGOT SA PURONG FILIPINO LAMANG.',
+    AppLanguage.taglish => 'SUMAGOT SA TAGLISH.',
+  };
+
+  /// System instruction for Gemini SDK's authoritative system role when
+  /// generating structured study content (flashcards, quizzes, reviewer).
+  String get contentGenerationSystemPrompt => switch (this) {
+    AppLanguage.english =>
+      'You are an expert study content generator for Filipino students. '
+      'Your active language setting is PURE ENGLISH. '
+      'ALL content you produce — every word, every phrase, every sentence — '
+      'MUST be in grammatically correct English. '
+      'DO NOT use Tagalog, Filipino, or Taglish words under any circumstances, '
+      'even if the source document is written in Filipino. '
+      'When the source is in Filipino, TRANSLATE all concepts to English in your output.',
+
+    AppLanguage.filipino =>
+      'Ikaw ay isang dalubhasang tagagawa ng pang-aaral na nilalaman para sa mga estudyanteng Pilipino. '
+      'Ang iyong aktibong setting ng wika ay PURONG FILIPINO. '
+      'LAHAT ng nilalaman na iyong ginagawa — bawat salita, bawat parirala, bawat pangungusap — '
+      'DAPAT ay sa wastong Filipino/Tagalog. '
+      'HUWAG gumamit ng English maliban sa mga teknikal na termino na walang Filipino na katumbas.',
+
+    AppLanguage.taglish =>
+      'You are an expert study content generator for Filipino students. '
+      'Your active language setting is TAGLISH. '
+      'Generate all content in natural Taglish: Filipino sentence structure with English technical terms. '
+      'This is NOT pure English and NOT pure Filipino.',
+  };
+
   /// End-of-prompt anchor in the target language. Placed right before
   /// generation starts to prime the model's first output tokens.
   String get generateNowAnchor => switch (this) {

@@ -137,11 +137,11 @@ String _reviewerBadExample(AppLanguage language) => switch (language) {
   AppLanguage.english => '''
 {
   "reviewers": [
-    {"concept": "Teorya ng Selula", "explanation": "Lahat ng nabubuhay ay gawa sa cells. Ang cell ang basic unit of life.", "example": "Ang human body ay may trillions of cells."},
-    {"concept": "Cell Theory Principles", "explanation": "Cells are the fundamental unit of structure and function.", "example": "Every organism is composed of cells."}
+    {"concept": "Cell Theory", "explanation": "Cells are the basic unit of life.", "example": "Every organism is composed of one or more cells."},
+    {"concept": "Cell Theory Principles", "explanation": "Cells are the fundamental unit of structure and function in all living things.", "example": "Both bacteria and human muscle cells are built from cells."}
   ]
 }
-WHY THIS IS BAD: First item uses Filipino words (violates Pure English rule). Two items about the same concept. No "_reasoning" field.''',
+WHY THIS IS BAD: No "_reasoning" field. Two items cover the same concept (Cell Theory). Explanations are too brief and redundant.''',
 
   AppLanguage.filipino => '''
 {
@@ -233,11 +233,11 @@ String _flashcardBadExample(AppLanguage language) => switch (language) {
   AppLanguage.english => '''
 {
   "flashcards": [
-    {"front": "Kailan na-establish ang First Philippine Republic?", "back": "Ito ay itinatag noong January 23, 1899."},
-    {"front": "When was the First Philippine Republic established?", "back": "It was established on January 23, 1899."}
+    {"front": "When was the First Philippine Republic established?", "back": "January 23, 1899."},
+    {"front": "When was the First Philippine Republic established?", "back": "It was established on January 23, 1899, in Malolos, Bulacan."}
   ]
 }
-WHY THIS IS BAD: First item uses Filipino (violates Pure English). Two cards about the same concept. No "_reasoning" field.''',
+WHY THIS IS BAD: No "_reasoning" field. Two cards ask the identical question (duplicate concept). The first answer is too terse — no context.''',
 
   AppLanguage.filipino => '''
 {
@@ -338,11 +338,11 @@ String _quizBadExample(AppLanguage language) => switch (language) {
   AppLanguage.english => '''
 {
   "quizzes": [
-    {"question": "Ano ang tawag sa organism na gumagawa ng sariling pagkain?", "options": ["Consumer", "Producer", "Decomposer", "Scavenger"], "correctIndex": 0},
-    {"question": "Which organism produces its own food?", "options": ["Consumer", "Producer", "Decomposer", "Scavenger"], "correctIndex": 1}
+    {"question": "What do you call an organism that produces its own food?", "options": ["Consumer", "Producer", "Decomposer", "Scavenger"], "correctIndex": 0},
+    {"question": "Which organism produces its own food through photosynthesis?", "options": ["Consumer", "Producer", "Decomposer", "Scavenger"], "correctIndex": 1}
   ]
 }
-WHY THIS IS BAD: First question uses Filipino (violates Pure English). Two questions same concept. correctIndex always 0 or 1. No "_reasoning" field.''',
+WHY THIS IS BAD: No "_reasoning" field. Two questions test the same concept (producers). The first question has the wrong correctIndex (0 = Consumer is incorrect). Only using correctIndex 0 and 1 — vary it!''',
 
   AppLanguage.filipino => '''
 {
