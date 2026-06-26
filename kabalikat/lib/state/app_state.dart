@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../models/student_profile.dart';
+import '../repositories/hybrid_study_content_repository.dart';
 import '../services/storage_service.dart';
 import '../services/connectivity_service.dart';
 import '../services/ai_service.dart';
@@ -12,11 +13,17 @@ class AppState extends ChangeNotifier {
   final ConnectivityManager connectivity = ConnectivityManager();
   late final AiService ai;
 
+  /// Hybrid repository: routes study-content generation to Gemini (online)
+  /// or Ollama (offline / timeout cascade). Use this for all new deck
+  /// generation; [ai] is kept for the Tutor and Practice screens.
+  late final HybridStudyContentRepository repo;
+
   StudentProfile profile = StudentProfile();
   Map<String, double> mastery = {}; // topic -> 0..1
 
   AppState(this.storage) {
     ai = AiService(connectivity, storage);
+    repo = HybridStudyContentRepository(connectivity, storage);
   }
 
   Future<void> load() async {

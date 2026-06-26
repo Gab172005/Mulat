@@ -9,8 +9,10 @@ import '../models/study_content.dart';
 import '../data/offline_content.dart';
 import '../services/prompt_builder.dart';
 import '../services/json_parser.dart';
-import 'connectivity_service.dart';
-import 'storage_service.dart';
+import '../services/connectivity_service.dart';
+import '../services/storage_service.dart';
+import '../repositories/study_content_repository.dart';
+import '../repositories/hybrid_study_content_repository.dart';
 
 /// Result of a tutor turn: the text plus whether it came from cache.
 class TutorReply {
@@ -51,8 +53,11 @@ class TutorReply {
 class AiService {
   final ConnectivityManager connectivity;
   final StorageService storage;
+  late final StudyContentRepository _repository;
 
-  AiService(this.connectivity, this.storage);
+  AiService(this.connectivity, this.storage) {
+    _repository = HybridStudyContentRepository(connectivity, storage);
+  }
 
   // ── Gemini API Configuration ───────────────────────────────────────
   // Using Google's Generative AI REST API directly for simplicity.
@@ -102,36 +107,21 @@ class AiService {
       _ => ContentMode.flashcards, // Default to flashcards.
     };
 
-    // Smart truncate: preserve sentence boundaries instead of cutting
-    // mid-sentence, which confuses small models.
-    final text = _smartTruncate(extractedText);
-
-    // ── ROUTE 1: Try Gemini (online) ─────────────────────────────
-    if (_canUseGemini) {
-      try {
-        final raw = await _callGemini(
-          _buildGeminiPrompt(text, contentMode, language),
-          maxTokens: 4096,
-        );
-        final content = _parseResponse(raw, contentMode, offline: false);
-        if (_hasContent(content)) return content;
-        // If Gemini returned empty/bad JSON, fall through to Ollama.
-      } catch (e) {
-        print('[AiService] Gemini failed, falling back to Ollama: $e');
-      }
-    }
-
-    // ── ROUTE 2: Try Ollama (offline / fallback) ─────────────────
     try {
-      final prompts = buildOllamaPrompt(
-        extractedText: text,
-        mode: contentMode,
-        language: language,
+      // Delegate content generation to the Hybrid Repository.
+      final rawJson = await _repository.generateContent(
+        extractedText: extractedText,
+        targetLanguage: language.name, // Convert AppLanguage enum to string
+        contentFormat: mode,
       );
-      final raw = await _callOllama(prompts.system, prompts.user);
-      return _parseResponse(raw, contentMode, offline: true);
+      
+      // Determine if offline based on connectivity manager's current state.
+      // (The repository might have fallen back, so we use the live state).
+      final isOffline = !connectivity.isOnline;
+
+      return _parseResponse(rawJson, contentMode, offline: isOffline);
     } catch (e) {
-      print('[AiService] Ollama also failed: $e');
+      print('[AiService] Repository generation failed: $e');
       // Return empty content — UI handles gracefully.
       return const StudyContent(generatedOffline: true);
     }
@@ -292,43 +282,9 @@ class AiService {
     }
   }
 
-  bool _hasContent(StudyContent c) =>
-      c.reviewers.isNotEmpty || c.flashcards.isNotEmpty || c.quizzes.isNotEmpty;
 
-  // ══════════════════════════════════════════════════════════════════
-  //  GEMINI PROMPT BUILDER
-  // ══════════════════════════════════════════════════════════════════
-  String _buildGeminiPrompt(String text, ContentMode mode, AppLanguage language) {
-    // Gemini is smart enough to follow instructions without few-shot,
-    // but we enforce language directives for strict compliance.
-    final modeInstruction = switch (mode) {
-      ContentMode.reviewer =>
-        'Generate a reviewer (key concepts summary). Return JSON with key "reviewers", '
-        'each item having "concept", "explanation", "example". Generate at least 5 items.',
-      ContentMode.flashcards =>
-        'Generate flashcards. Return JSON with key "flashcards", '
-        'each item having "front" (question) and "back" (answer). Generate at least 10.',
-      ContentMode.quiz =>
-        'Generate multiple-choice quiz questions. Return JSON with key "quizzes", '
-        'each item having "question", "options" (array of 4), "correctIndex" (0-based). '
-        'Generate at least 10.',
-    };
 
-    return '''You are an expert study content generator for Filipino students.
-$modeInstruction
 
-${language.contentLanguageDirective}
-
-${language.crossLanguageInstruction}
-
-Extract information ONLY from the provided document text.
-Return ONLY valid JSON. No markdown, no explanation.
-
-Document Text:
-$text
-
-${language.generateNowAnchor}''';
-  }
 
   // ══════════════════════════════════════════════════════════════════
   //  GEMINI API CALL

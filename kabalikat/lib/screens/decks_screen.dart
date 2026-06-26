@@ -3,8 +3,10 @@ import 'package:provider/provider.dart';
 import '../services/l10n_service.dart';
 import '../services/ocr_service.dart';
 
+import '../models/student_profile.dart';
 import '../models/study_deck.dart';
 import '../services/document_service.dart';
+import '../services/json_parser.dart';
 import '../state/app_state.dart';
 import 'deck_view_screen.dart';
 
@@ -38,11 +40,52 @@ class _DecksScreenState extends State<DecksScreen> {
     });
   }
 
+  /// Generates a [StudyDeck] via [HybridStudyContentRepository].
+  ///
+  /// Fires flashcard and quiz generation in parallel so total wall-clock
+  /// time equals the slower of the two (not their sum). Both calls share
+  /// the same routing logic: Gemini if online, Ollama cascade if not.
+  Future<StudyDeck> _generateDeck(String text, String title) async {
+    final appState = context.read<AppState>();
+    // Convert AppLanguage enum to the string the repository contract expects.
+    final targetLanguage = appState.profile.language.label;
+
+    final results = await Future.wait([
+      appState.repo.generateContent(
+        extractedText: text,
+        targetLanguage: targetLanguage,
+        contentFormat: 'flashcards',
+      ),
+      appState.repo.generateContent(
+        extractedText: text,
+        targetLanguage: targetLanguage,
+        contentFormat: 'quiz',
+      ),
+    ]);
+
+    // Parse the JSON strings using SecureJsonParser.
+    final parsedFlashcards = SecureJsonParser.parseFlashcards(results[0]);
+    final parsedQuizzes = SecureJsonParser.parseQuizzes(results[1]);
+
+    // Convert StudyContent items → StudyDeck items.
+    final flashcards = parsedFlashcards
+        .map((f) => Flashcard(front: f.front, back: f.back))
+        .toList();
+
+    final quizzes = parsedQuizzes
+        .map((q) => Microquiz(
+              question: q.question,
+              options: q.options,
+              answerIndex: q.correctIndex,
+            ))
+        .toList();
+
+    return StudyDeck(title: title, flashcards: flashcards, quizzes: quizzes);
+  }
+
   Future<void> _uploadAndGenerateDeck() async {
     final docService = DocumentService();
     final appState = context.read<AppState>();
-    final aiService = appState.ai;
-    final storage = appState.storage;
 
     final text = await docService.pickAndExtractPdf();
     if (text == null || text.isEmpty) {
@@ -60,12 +103,11 @@ class _DecksScreenState extends State<DecksScreen> {
     });
 
     try {
-      final deck = await aiService.generateStudyDeck(
+      final deck = await _generateDeck(
         text,
         'Generated Deck ${DateTime.now().toLocal().toString().split('.')[0]}',
-        language: appState.profile.language,
       );
-      await storage.saveDeck(deck);
+      await appState.storage.saveDeck(deck);
       _loadDecks();
     } catch (e) {
       if (mounted) {
@@ -113,10 +155,9 @@ class _DecksScreenState extends State<DecksScreen> {
         _showUploadView = false;
       });
 
-      final deck = await appState.ai.generateStudyDeck(
+      final deck = await _generateDeck(
         text,
         'Photo Notes ${DateTime.now().toLocal().toString().split('.')[0]}',
-        language: appState.profile.language,
       );
       await appState.storage.saveDeck(deck);
       _loadDecks();
