@@ -10,6 +10,7 @@ class StorageService {
   static const _kProfile = 'profile';
   static const _kMastery = 'mastery'; // Map<topic, double 0..1>
   static const _kApiKey = 'api_key';
+  static const _kModelId = 'on_device_model_id'; // chosen on-device model
   static const _kRecent = 'recent_asked'; // List<String> recent question prompts
 
   Future<void> init() async {
@@ -46,6 +47,10 @@ class StorageService {
       await _prefs.setString(_kApiKey, key);
     }
   }
+
+  // ---- Selected on-device model id ----
+  String? get modelId => _prefs.getString(_kModelId);
+  Future<void> setModelId(String id) => _prefs.setString(_kModelId, id);
 
   // ---- Recently-asked questions (spaced-repetition cooldown) ----
   List<String> loadRecentAsked() {

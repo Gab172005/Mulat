@@ -65,6 +65,9 @@ class S {
   String get demoOfflineSub => _p('Force cached mode without airplane mode',
       'Puwersahing cached mode nang walang airplane mode');
   String get onDeviceAI => _p('On-device AI (offline)', 'On-device AI (offline)');
+  String get onDeviceChoose => _p(
+      'Pick a model to run fully offline. All are free — no token, no sign-up.',
+      'Pumili ng modelo na tatakbo nang offline. Lahat libre — walang token o sign-up.');
   String get onDeviceNotWired => _p(
       'Real offline AI tutor (no signal needed). Not wired into this build yet — follow ON_DEVICE_MODEL.md to drop in the flutter_gemma engine, then download the model here.',
       'Tunay na offline AI tutor (walang signal kailangan). Hindi pa naka-aktibo sa build na ito — sundin ang ON_DEVICE_MODEL.md para ilagay ang flutter_gemma engine, tapos i-download ang modelo dito.');
@@ -82,6 +85,12 @@ class S {
   String get apiKeyNone => _p('No key set — app uses cached content only.',
       'Walang key — cached na nilalaman lang ang gamit.');
   String get pasteKey => _p('Paste API key', 'I-paste ang API key');
+  String get save => _p('Save', 'I-save');
+  String get pasteToken =>
+      _p('Paste HuggingFace token (hf_…)', 'I-paste ang HuggingFace token (hf_…)');
+  String get tokenInfo => _p(
+      'Optional — the default model needs no token. Only paste a HuggingFace token if you switch to a gated model like Gemma.',
+      'Opsyonal — hindi kailangan ng token ang default na modelo. Mag-paste lang ng HuggingFace token kung lilipat sa gated na modelo gaya ng Gemma.');
   String get saveKey => _p('Save key', 'I-save ang key');
   String get clear => _p('Clear', 'Burahin');
   String get keySavedSnack => _p('API key saved', 'Na-save ang API key');

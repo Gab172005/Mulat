@@ -41,6 +41,15 @@ class AppState extends ChangeNotifier {
     await connectivity.init();
     connectivity.onChange.listen((_) => notifyListeners());
     localModel.addListener(notifyListeners);
+    final savedModel = storage.modelId;
+    if (savedModel != null) localModel.selectModel(savedModel);
+    notifyListeners();
+  }
+
+  /// Switch the on-device model and remember the choice.
+  Future<void> selectModel(String id) async {
+    localModel.selectModel(id);
+    await storage.setModelId(id);
     notifyListeners();
   }
 

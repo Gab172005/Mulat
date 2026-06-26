@@ -8,6 +8,20 @@ enum LocalModelStatus {
   unsupported, // device can't run it (too little RAM, etc.)
 }
 
+/// A selectable on-device model option (engine-agnostic, for the picker UI).
+class LocalModelChoice {
+  final String id;
+  final String label; // e.g. "Qwen2.5 1.5B"
+  final String size; // e.g. "~1.6 GB"
+  final String note; // e.g. "balanced" / "best, needs a strong phone"
+  const LocalModelChoice({
+    required this.id,
+    required this.label,
+    required this.size,
+    required this.note,
+  });
+}
+
 /// Abstraction for an on-device LLM (e.g. Gemma via flutter_gemma / MediaPipe).
 ///
 /// This interface is what the rest of the app talks to. The default
@@ -24,6 +38,18 @@ abstract class LocalModelService extends ChangeNotifier {
   LocalModelStatus get status;
   double get downloadProgress; // 0..1
   bool get isReady => status == LocalModelStatus.ready;
+
+  /// Last failure detail (for the Settings UI). Null when there's no error.
+  String? get errorMessage => null;
+
+  /// Models the user can pick from (all non-gated). Empty in the stub.
+  List<LocalModelChoice> get availableModels => const [];
+
+  /// Currently-selected model id.
+  String get selectedModelId => '';
+
+  /// Switch the active model (resets download state). No-op in stub.
+  void selectModel(String id) {}
 
   /// Human-readable model name (for the Settings UI).
   String get modelName;

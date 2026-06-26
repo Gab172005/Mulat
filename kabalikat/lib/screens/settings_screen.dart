@@ -106,11 +106,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
         // On-device AI model (Tier 2)
         Text(s.onDeviceAI),
         const SizedBox(height: 4),
-        Text(
-          '${state.localModel.modelName} · ${state.localModel.downloadSize}',
-          style: const TextStyle(color: Colors.white70, fontSize: 13),
-        ),
+        Text(s.onDeviceChoose,
+            style: const TextStyle(color: Colors.white54, fontSize: 12)),
         const SizedBox(height: 8),
+        // Model picker (all non-gated; no token). Locked while downloading.
+        if (state.localModel.availableModels.isNotEmpty)
+          DropdownButton<String>(
+            value: state.localModel.selectedModelId,
+            isExpanded: true,
+            onChanged:
+                state.localModel.status == LocalModelStatus.downloading
+                    ? null
+                    : (id) {
+                        if (id != null) state.selectModel(id);
+                      },
+            items: [
+              for (final m in state.localModel.availableModels)
+                DropdownMenuItem(
+                  value: m.id,
+                  child: Text('${m.label} · ${m.size} — ${m.note}',
+                      overflow: TextOverflow.ellipsis),
+                ),
+            ],
+          ),
+        const SizedBox(height: 12),
         _ModelStatusRow(model: state.localModel, s: s),
       ],
     );
@@ -140,8 +159,18 @@ class _ModelStatusRow extends StatelessWidget {
     }
     switch (model.status) {
       case LocalModelStatus.unsupported:
-        return Text(s.modelUnsupported,
-            style: const TextStyle(color: Colors.white54, fontSize: 12));
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(s.modelUnsupported,
+                style: const TextStyle(color: Color(0xFFFF9D6B), fontSize: 12)),
+            if (model.errorMessage != null) ...[
+              const SizedBox(height: 4),
+              Text(model.errorMessage!,
+                  style: const TextStyle(color: Colors.white38, fontSize: 11)),
+            ],
+          ],
+        );
       case LocalModelStatus.downloading:
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -164,10 +193,20 @@ class _ModelStatusRow extends StatelessWidget {
           ],
         );
       case LocalModelStatus.notInstalled:
-        return ElevatedButton.icon(
-          onPressed: model.downloadAndLoad,
-          icon: const Icon(Icons.download),
-          label: Text(s.downloadModel),
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ElevatedButton.icon(
+              onPressed: model.downloadAndLoad,
+              icon: const Icon(Icons.download),
+              label: Text(s.downloadModel),
+            ),
+            if (model.errorMessage != null) ...[
+              const SizedBox(height: 6),
+              Text(model.errorMessage!,
+                  style: const TextStyle(color: Color(0xFFFF9D6B), fontSize: 11)),
+            ],
+          ],
         );
     }
   }
