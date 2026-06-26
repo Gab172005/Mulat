@@ -42,12 +42,6 @@ flutter run
 * Multi-Format Document Ingestion
 * Interactive 3D Flashcards: Responsive 3D flipping card elements displaying terms on the front and definitions on the back, complete with keyboard controls and progress meters.
 
-## Features To Be Implemented
-
-* Backend implementation of the above
-
-* Caching of static assets, allowing the ability to boot and generate mock study guides even while completely offline
-
 ## AI Tools Used
 * Gemini Antigravity
 * Claude
