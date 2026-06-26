@@ -115,11 +115,11 @@ class GemmaLocalModelService extends LocalModelService {
     notifyListeners();
   }
 
-  // flutter_gemma must be initialized once before installModel/getActiveModel.
+  // flutter_gemma must be initialized once (and awaited) before any use.
   static bool _initialized = false;
-  void _ensureInit() {
+  Future<void> _ensureInit() async {
     if (_initialized) return;
-    FlutterGemma.initialize(maxDownloadRetries: 5);
+    await FlutterGemma.initialize(maxDownloadRetries: 5);
     _initialized = true;
   }
 
@@ -130,7 +130,7 @@ class GemmaLocalModelService extends LocalModelService {
     // --- Step 1: download the model file (no token; all models non-gated) ---
     try {
       _set(LocalModelStatus.downloading);
-      _ensureInit();
+      await _ensureInit();
       await FlutterGemma.installModel(modelType: m.type)
           .fromNetwork(m.url)
           .withProgress((p) {
