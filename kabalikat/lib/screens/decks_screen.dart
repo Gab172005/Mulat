@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/l10n_service.dart';
+import '../services/ocr_service.dart';
 
 import '../models/study_deck.dart';
 import '../services/document_service.dart';
@@ -81,6 +82,49 @@ class _DecksScreenState extends State<DecksScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('$feature upload is coming soon!')),
     );
+  }
+
+  /// ── OCR Path: Photograph notes → ML Kit → LLM ──
+  /// Uses on-device OCR (works offline!) to extract text from a photo.
+  Future<void> _uploadFromImage({bool fromCamera = false}) async {
+    final ocr = OcrService();
+    final appState = context.read<AppState>();
+
+    try {
+      final text = fromCamera
+          ? await ocr.captureAndExtract()
+          : await ocr.pickImageAndExtract();
+
+      if (text == null || text.trim().isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not extract text from image.')),
+          );
+        }
+        return;
+      }
+
+      setState(() {
+        _isLoading = true;
+        _showUploadView = false;
+      });
+
+      final deck = await appState.ai.generateStudyDeck(
+        text,
+        'Photo Notes ${DateTime.now().toLocal().toString().split('.')[0]}',
+      );
+      await appState.storage.saveDeck(deck);
+      _loadDecks();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
+    } finally {
+      ocr.dispose();
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
   Widget _buildOptionTile({
@@ -198,7 +242,7 @@ class _DecksScreenState extends State<DecksScreen> {
                       icon: Icons.camera_alt,
                       iconColor: Colors.greenAccent,
                       title: 'Photograph your notes',
-                      onTap: () => _showComingSoon('Photograph your notes'),
+                      onTap: () => _uploadFromImage(fromCamera: true),
                     ),
                   ],
                 ),

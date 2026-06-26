@@ -9,7 +9,7 @@ import '../services/ai_service.dart';
 /// and the adaptive-difficulty logic used by the Practice screen.
 class AppState extends ChangeNotifier {
   final StorageService storage;
-  final ConnectivityService connectivity = ConnectivityService();
+  final ConnectivityManager connectivity = ConnectivityManager();
   late final AiService ai;
 
   StudentProfile profile = StudentProfile();

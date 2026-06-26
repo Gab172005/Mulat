@@ -5,7 +5,10 @@ import 'package:http/http.dart' as http;
 import '../models/student_profile.dart';
 import '../models/practice_question.dart';
 import '../models/study_deck.dart';
+import '../models/study_content.dart';
 import '../data/offline_content.dart';
+import '../services/prompt_builder.dart';
+import '../services/json_parser.dart';
 import 'connectivity_service.dart';
 import 'storage_service.dart';
 
@@ -16,30 +19,166 @@ class TutorReply {
   TutorReply(this.text, {this.offline = false});
 }
 
-/// Hybrid AI brain.
-///  - ONLINE + API key  -> live LLM (bilingual, grade-aware).
-///  - OFFLINE / no key   -> bundled cached content (keyword tutor + question bank).
-/// Either way the app keeps working; offline is the default, not an error.
+/// ─── HYBRID AI SERVICE ───────────────────────────────────────────────
+/// Repository-pattern AI brain that routes between TWO backends:
+///
+///   ┌────────────────────┐
+///   │ ConnectivityManager │
+///   └────────┬───────────┘
+///            │ isOnline?
+///     ┌──────┴──────┐
+///     ▼             ▼
+///  ┌──────┐   ┌──────────┐
+///  │Gemini│   │  Ollama   │
+///  │ API  │   │ localhost │
+///  └──────┘   └──────────┘
+///     │             │
+///     └──────┬──────┘
+///            ▼
+///    SecureJsonParser
+///            │
+///            ▼
+///     StudyContent / StudyDeck
+///
+/// OFFLINE-FALLBACK MECHANICS:
+/// 1. Check ConnectivityManager.isOnline FIRST.
+/// 2. If online AND Gemini API key exists → call Gemini.
+/// 3. If online call fails → fall through to Ollama.
+/// 4. If offline → go directly to Ollama.
+/// 5. If Ollama also fails → return bundled offline content.
+///
+/// This ensures the app NEVER crashes due to network issues.
 class AiService {
-  final ConnectivityService connectivity;
+  final ConnectivityManager connectivity;
   final StorageService storage;
 
   AiService(this.connectivity, this.storage);
 
-  // Anthropic Messages API. Swap baseUrl/headers for any OpenAI-compatible
-  // endpoint if your team prefers.
-  static const _baseUrl = 'https://api.anthropic.com/v1/messages';
-  static const _model = 'claude-haiku-4-5-20251001';
+  // ── Gemini API Configuration ───────────────────────────────────────
+  // Using Google's Generative AI REST API directly for simplicity.
+  // The API key is stored in StorageService (set by user in Settings).
+  static const _geminiModel = 'gemini-2.0-flash-lite';
 
-  bool get _canUseLive =>
+  String get _geminiUrl =>
+      'https://generativelanguage.googleapis.com/v1beta/models/$_geminiModel:generateContent?key=${storage.apiKey ?? ''}';
+
+  // ── Ollama Configuration ───────────────────────────────────────────
+  // Preferred models for hackathon: Llama 3.2 3B (best quality) or
+  // Gemma 2 2B (smaller, faster). Falls back through multiple model names.
+  static const _ollamaModels = [
+    'llama3.2:3b',   // Best quality for the size
+    'gemma2:2b',     // Google's compact model
+    'llama3.2:1b',   // Ultra-light fallback
+    'qwen2.5:0.5b',  // Tiny but sometimes available
+  ];
+
+  bool get _canUseGemini =>
       connectivity.isOnline &&
       (storage.apiKey != null && storage.apiKey!.isNotEmpty);
 
-  // ---------------------------------------------------------------- TUTOR
-  Future<TutorReply> tutor(String question, StudentProfile p) async {
-    if (_canUseLive) {
+  // ══════════════════════════════════════════════════════════════════
+  //  REPOSITORY PATTERN: generateStudyContent()
+  // ══════════════════════════════════════════════════════════════════
+  /// The main entry point. Routes to Gemini or Ollama based on
+  /// connectivity. Mode can be 'reviewer', 'flashcards', or 'quiz'.
+  ///
+  /// Returns a [StudyContent] with parsed items. Never throws to the
+  /// UI — wraps all errors and returns empty content on total failure.
+  Future<StudyContent> generateStudyContent(
+    String extractedText,
+    String mode,
+  ) async {
+    // Map string mode to enum.
+    final contentMode = switch (mode) {
+      'reviewer' => ContentMode.reviewer,
+      'flashcards' => ContentMode.flashcards,
+      'quiz' => ContentMode.quiz,
+      _ => ContentMode.flashcards, // Default to flashcards.
+    };
+
+    // Truncate text for small model context windows.
+    const maxLen = 6000;
+    final text =
+        extractedText.length > maxLen ? extractedText.substring(0, maxLen) : extractedText;
+
+    // ── ROUTE 1: Try Gemini (online) ─────────────────────────────
+    if (_canUseGemini) {
       try {
-        final text = await _callLlm(
+        final raw = await _callGemini(
+          _buildGeminiPrompt(text, contentMode),
+          maxTokens: 4096,
+        );
+        final content = _parseResponse(raw, contentMode, offline: false);
+        if (_hasContent(content)) return content;
+        // If Gemini returned empty/bad JSON, fall through to Ollama.
+      } catch (e) {
+        print('[AiService] Gemini failed, falling back to Ollama: $e');
+      }
+    }
+
+    // ── ROUTE 2: Try Ollama (offline / fallback) ─────────────────
+    try {
+      final prompts = buildOllamaPrompt(
+        extractedText: text,
+        mode: contentMode,
+      );
+      final raw = await _callOllama(prompts.system, prompts.user);
+      return _parseResponse(raw, contentMode, offline: true);
+    } catch (e) {
+      print('[AiService] Ollama also failed: $e');
+      // Return empty content — UI handles gracefully.
+      return const StudyContent(generatedOffline: true);
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  //  LEGACY: generateStudyDeck() — backwards compatible
+  // ══════════════════════════════════════════════════════════════════
+  /// Generates a full StudyDeck (flashcards + quizzes) for the Decks
+  /// screen. Uses generateStudyContent() internally.
+  Future<StudyDeck> generateStudyDeck(String documentText, String title) async {
+    // Truncate document text if too long for local model context
+    const maxLength = 6000;
+    final text = documentText.length > maxLength
+        ? documentText.substring(0, maxLength)
+        : documentText;
+
+    // Generate flashcards and quizzes in parallel for speed.
+    final results = await Future.wait([
+      generateStudyContent(text, 'flashcards'),
+      generateStudyContent(text, 'quiz'),
+    ]);
+
+    final flashcardContent = results[0];
+    final quizContent = results[1];
+
+    // Convert StudyContent models to StudyDeck models.
+    final flashcards = flashcardContent.flashcards
+        .map((f) => Flashcard(front: f.front, back: f.back))
+        .toList();
+
+    final quizzes = quizContent.quizzes
+        .map((q) => Microquiz(
+              question: q.question,
+              options: q.options,
+              answerIndex: q.correctIndex,
+            ))
+        .toList();
+
+    return StudyDeck(
+      title: title,
+      flashcards: flashcards,
+      quizzes: quizzes,
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  //  TUTOR (kept for backward compatibility)
+  // ══════════════════════════════════════════════════════════════════
+  Future<TutorReply> tutor(String question, StudentProfile p) async {
+    if (_canUseGemini) {
+      try {
+        final text = await _callGemini(
           'You are Kabalikat, a patient study companion for a Grade ${p.grade} '
           'Filipino student. ${p.language.promptHint} Keep it short, use a '
           'simple local example, and end with one quick check-question. '
@@ -47,9 +186,22 @@ class AiService {
         );
         return TutorReply(text);
       } catch (_) {
-        // fall through to offline
+        // Fall through to offline.
       }
     }
+
+    // Try Ollama for tutor if available.
+    try {
+      final raw = await _callOllama(
+        'You are Kabalikat, a patient AI study companion for Filipino students. '
+        '${p.language.promptHint} Keep answers concise.',
+        'Student (Grade ${p.grade}) asks: "$question"\n'
+        'Give a clear, helpful answer with a simple example. '
+        'End with one quick check-question.',
+      );
+      return TutorReply(raw);
+    } catch (_) {}
+
     return TutorReply(_offlineTutor(question, p), offline: true);
   }
 
@@ -65,26 +217,24 @@ class AiService {
         return body;
       }
     }
-    // Generic offline guidance.
     final tips = p.language == AppLanguage.english
         ? "I'm offline right now, so I can't generate a full answer — but here's a tip: break the problem into smaller steps and try a worked example. Reconnect for a detailed explanation, or open Practice for cached exercises."
         : "Offline muna ako kaya hindi pa ako makagawa ng buong sagot — pero subukan mong hatiin sa maliliit na hakbang ang problema. Kumonekta ulit para sa detalyadong paliwanag, o pumunta sa Practice para sa naka-cache na ehersisyo.";
     return tips;
   }
 
-  // ------------------------------------------------------------- PRACTICE
-  /// Picks/creates a question at the target difficulty (1..3).
+  // ══════════════════════════════════════════════════════════════════
+  //  PRACTICE (kept for backward compatibility)
+  // ══════════════════════════════════════════════════════════════════
   Future<PracticeQuestion> nextQuestion({
     required StudentProfile p,
     required int difficulty,
     String topic = 'General',
   }) async {
-    if (_canUseLive) {
+    if (_canUseGemini) {
       try {
         return await _generateQuestion(p, difficulty, topic);
-      } catch (_) {
-        // fall through to offline bank
-      }
+      } catch (_) {}
     }
     return _offlineQuestion(difficulty);
   }
@@ -100,285 +250,163 @@ class AiService {
   Future<PracticeQuestion> _generateQuestion(
       StudentProfile p, int difficulty, String topic) async {
     final diffLabel = ['', 'easy', 'medium', 'hard'][difficulty];
-    final raw = await _callLlm(
+    final raw = await _callGemini(
       'Create ONE $diffLabel multiple-choice question for a Grade ${p.grade} '
       'Filipino student${topic == 'General' ? '' : ' about $topic'}. '
       'Return ONLY valid JSON with keys: topic, difficulty ($difficulty), '
       'prompt, promptFil, choices (array of 4), answerIndex (0-3), '
       'explanation, explanationFil. promptFil/explanationFil are Filipino.',
+      maxTokens: 600,
     );
     final jsonStr = raw.substring(raw.indexOf('{'), raw.lastIndexOf('}') + 1);
     return PracticeQuestion.fromJson(jsonDecode(jsonStr));
   }
 
-  // ------------------------------------------------------------- DECK GEN
-  Future<StudyDeck> generateStudyDeck(String documentText, String title) async {
-    // Truncate document text if too long for local model context
-    const maxLength = 6000;
-    final text = documentText.length > maxLength
-        ? documentText.substring(0, maxLength)
-        : documentText;
+  // ══════════════════════════════════════════════════════════════════
+  //  RESPONSE PARSING — Uses SecureJsonParser
+  // ══════════════════════════════════════════════════════════════════
+  StudyContent _parseResponse(String raw, ContentMode mode, {required bool offline}) {
+    switch (mode) {
+      case ContentMode.reviewer:
+        return StudyContent(
+          reviewers: SecureJsonParser.parseReviewers(raw),
+          generatedOffline: offline,
+        );
+      case ContentMode.flashcards:
+        return StudyContent(
+          flashcards: SecureJsonParser.parseFlashcards(raw),
+          generatedOffline: offline,
+        );
+      case ContentMode.quiz:
+        return StudyContent(
+          quizzes: SecureJsonParser.parseQuizzes(raw),
+          generatedOffline: offline,
+        );
+    }
+  }
 
-    final flashcardsPrompt = '''
-You are an expert study assistant proficient in Filipino. Your task is to extract facts ONLY from the provided document, translate the content, and explain it in clear Filipino.
-ALL flashcard questions and answers MUST be written in Filipino.
-CRITICAL REQUIREMENT: You MUST generate AT LEAST 10 flashcards.
-Return ONLY valid JSON. Do not include markdown formatting like ```json.
-The JSON must follow this exact structure:
-{
-  "flashcards": [
-    {"front": "[Question in Filipino]", "back": "[Answer in Filipino]"}
-  ]
-}
+  bool _hasContent(StudyContent c) =>
+      c.reviewers.isNotEmpty || c.flashcards.isNotEmpty || c.quizzes.isNotEmpty;
+
+  // ══════════════════════════════════════════════════════════════════
+  //  GEMINI PROMPT BUILDER
+  // ══════════════════════════════════════════════════════════════════
+  String _buildGeminiPrompt(String text, ContentMode mode) {
+    // Gemini is smart enough to follow instructions without few-shot,
+    // but we still enforce JSON-only output and Taglish preference.
+    final modeInstruction = switch (mode) {
+      ContentMode.reviewer =>
+        'Generate a reviewer (key concepts summary). Return JSON with key "reviewers", '
+        'each item having "concept", "explanation", "example". Generate at least 5 items.',
+      ContentMode.flashcards =>
+        'Generate flashcards. Return JSON with key "flashcards", '
+        'each item having "front" (question) and "back" (answer). Generate at least 10.',
+      ContentMode.quiz =>
+        'Generate multiple-choice quiz questions. Return JSON with key "quizzes", '
+        'each item having "question", "options" (array of 4), "correctIndex" (0-based). '
+        'Generate at least 10.',
+    };
+
+    return '''You are an expert study content generator for Filipino students.
+$modeInstruction
+Write all content in Taglish (mix of Filipino and English).
+Extract information ONLY from the provided document text.
+Return ONLY valid JSON. No markdown, no explanation.
 
 Document Text:
-$text
-''';
-
-    final quizzesPrompt = '''
-You are an expert study assistant proficient in Filipino. Your task is to extract facts ONLY from the provided document, translate the content, and explain it in clear Filipino.
-ALL quiz questions and choices MUST be written in Filipino.
-CRITICAL REQUIREMENT: You MUST generate AT LEAST 10 quizzes.
-Return ONLY valid JSON. Do not include markdown formatting like ```json.
-The JSON must follow this exact structure:
-{
-  "quizzes": [
-    {"question": "[Question in Filipino]", "options": ["[Option A]", "[Option B]", "[Option C]", "[Option D]"], "answerIndex": 0}
-  ]
-}
-
-Document Text:
-$text
-''';
-
-    Future<String> getResponse(String prompt) async {
-      if (_canUseLive) {
-        try {
-          return await _callLlm(prompt, maxTokens: 2000);
-        } catch (_) {}
-      }
-      return await _generateWithOllama(prompt);
-    }
-
-    List<dynamic> flashcardsList = [];
-    try {
-      final responseText = await getResponse(flashcardsPrompt);
-      flashcardsList = _parseFlashcardsRobustly(responseText);
-    } catch (e) {
-      throw Exception('Failed to generate/parse Flashcards: $e');
-    }
-
-    List<dynamic> quizzesList = [];
-    try {
-      final responseText = await getResponse(quizzesPrompt);
-      quizzesList = _parseQuizzesRobustly(responseText);
-    } catch (e) {
-      throw Exception('Failed to generate/parse Quizzes: $e');
-    }
-
-    return StudyDeck.fromJson({
-      'title': title,
-      'flashcards': flashcardsList,
-      'quizzes': quizzesList,
-    });
+$text''';
   }
 
-  List<dynamic> _parseFlashcardsRobustly(String text) {
-    try {
-      var cleanText = text.trim();
-      if (cleanText.startsWith('```json')) {
-        cleanText = cleanText.substring(7);
-      } else if (cleanText.startsWith('```')) {
-        cleanText = cleanText.substring(3);
-      }
-      if (cleanText.endsWith('```')) {
-        cleanText = cleanText.substring(0, cleanText.length - 3);
-      }
-      cleanText = cleanText.trim();
-      final map = jsonDecode(cleanText);
-      if (map['flashcards'] is List) return map['flashcards'];
-    } catch (_) {}
-    
-    String fixed = text.trim();
-    int quotes = 0;
-    bool escaped = false;
-    for (int i = 0; i < fixed.length; i++) {
-      if (fixed[i] == '\\') {
-        escaped = !escaped;
-      } else if (fixed[i] == '"' && !escaped) {
-        quotes++;
-      } else {
-        escaped = false;
-      }
+  // ══════════════════════════════════════════════════════════════════
+  //  GEMINI API CALL
+  // ══════════════════════════════════════════════════════════════════
+  Future<String> _callGemini(String prompt, {int maxTokens = 4096}) async {
+    final res = await http.post(
+      Uri.parse(_geminiUrl),
+      headers: {'content-type': 'application/json'},
+      body: jsonEncode({
+        'contents': [
+          {
+            'parts': [
+              {'text': prompt}
+            ]
+          }
+        ],
+        'generationConfig': {
+          'maxOutputTokens': maxTokens,
+          'temperature': 0.2,
+          'responseMimeType': 'application/json',
+        },
+      }),
+    ).timeout(const Duration(seconds: 30));
+
+    if (res.statusCode != 200) {
+      throw Exception('Gemini error ${res.statusCode}: ${res.body}');
     }
-    if (quotes % 2 != 0) {
-      fixed += '"';
-    }
-    
-    final closings = ['', '}', ']}', '}]}', ']}]}', '}}]}'];
-    for (final close in closings) {
-      try {
-        var cText = (fixed + close).trim();
-        if (cText.startsWith('```json')) {
-          cText = cText.substring(7);
-        } else if (cText.startsWith('```')) {
-          cText = cText.substring(3);
-        }
-        if (cText.endsWith('```')) {
-          cText = cText.substring(0, cText.length - 3);
-        }
-        final map = jsonDecode(cText.trim());
-        if (map['flashcards'] is List) {
-          return map['flashcards'];
-        }
-      } catch (_) {}
-    }
-    
-    List<dynamic> fallback = [];
-    final regExp = RegExp(r'\{[^}]*\}');
-    final matches = regExp.allMatches(text);
-    for (final m in matches) {
-      try {
-        final obj = jsonDecode(m.group(0)!);
-        if (obj is Map && obj.containsKey('front') && obj.containsKey('back')) {
-          fallback.add(obj);
-        }
-      } catch (_) {}
-    }
-    return fallback;
+    final data = jsonDecode(res.body);
+    // Gemini response structure: candidates[0].content.parts[0].text
+    return (data['candidates'][0]['content']['parts'][0]['text'] as String).trim();
   }
 
-  List<dynamic> _parseQuizzesRobustly(String text) {
-    try {
-      var cleanText = text.trim();
-      if (cleanText.startsWith('```json')) {
-        cleanText = cleanText.substring(7);
-      } else if (cleanText.startsWith('```')) {
-        cleanText = cleanText.substring(3);
-      }
-      if (cleanText.endsWith('```')) {
-        cleanText = cleanText.substring(0, cleanText.length - 3);
-      }
-      cleanText = cleanText.trim();
-      final map = jsonDecode(cleanText);
-      if (map['quizzes'] is List) return map['quizzes'];
-    } catch (_) {}
-    
-    String fixed = text.trim();
-    int quotes = 0;
-    bool escaped = false;
-    for (int i = 0; i < fixed.length; i++) {
-      if (fixed[i] == '\\') {
-        escaped = !escaped;
-      } else if (fixed[i] == '"' && !escaped) {
-        quotes++;
-      } else {
-        escaped = false;
-      }
-    }
-    if (quotes % 2 != 0) {
-      fixed += '"';
-    }
-    
-    final closings = ['', '}', ']}', '}]}', ']}]}', '}}]}'];
-    for (final close in closings) {
-      try {
-        var cText = (fixed + close).trim();
-        if (cText.startsWith('```json')) {
-          cText = cText.substring(7);
-        } else if (cText.startsWith('```')) {
-          cText = cText.substring(3);
-        }
-        if (cText.endsWith('```')) {
-          cText = cText.substring(0, cText.length - 3);
-        }
-        final map = jsonDecode(cText.trim());
-        if (map['quizzes'] is List) {
-          return map['quizzes'];
-        }
-      } catch (_) {}
-    }
-    
-    List<dynamic> fallback = [];
-    final regExp = RegExp(r'\{[^}]*\}');
-    final matches = regExp.allMatches(text);
-    for (final m in matches) {
-      try {
-        final obj = jsonDecode(m.group(0)!);
-        if (obj is Map && obj.containsKey('question') && obj.containsKey('options')) {
-          fallback.add(obj);
-        }
-      } catch (_) {}
-    }
-    return fallback;
-  }
+  // ══════════════════════════════════════════════════════════════════
+  //  OLLAMA API CALL — with JSON Mode + Multi-Model Fallback
+  // ══════════════════════════════════════════════════════════════════
+  /// Calls the local Ollama API with:
+  ///   • {"format": "json"} to force JSON output.
+  ///   • System prompt for strict instruction following.
+  ///   • Multi-host fallback for Android emulator (10.0.2.2) vs device.
+  ///   • Multi-model fallback in case preferred model isn't pulled.
+  Future<String> _callOllama(String systemPrompt, String userPrompt) async {
+    final hosts =
+        Platform.isAndroid ? ['10.0.2.2', '127.0.0.1'] : ['localhost'];
 
-  Future<String> _generateWithOllama(String prompt) async {
-    final hosts = Platform.isAndroid ? ['127.0.0.1', '10.0.2.2'] : ['localhost'];
     http.Response? res;
     dynamic lastError;
 
+    // Try each host + model combination.
     for (final host in hosts) {
-      try {
-        final candidate = await http.post(
-          Uri.parse('http://$host:11434/api/generate'),
-          headers: {'content-type': 'application/json'},
-          body: jsonEncode({
-            'model': 'qwen2.5:0.5b',
-            'prompt': prompt,
-            'stream': false,
-            'format': 'json',
-            'options': {
-              'temperature': 0.1,
-              'top_p': 0.9,
-              'num_predict': 4096,
-              'num_ctx': 8192,
-            },
-          }),
-        );
-        if (candidate.statusCode == 200) {
-          res = candidate;
-          break;
-        } else {
-          lastError = Exception('Ollama error ${candidate.statusCode}');
+      for (final model in _ollamaModels) {
+        try {
+          final candidate = await http.post(
+            Uri.parse('http://$host:11434/api/generate'),
+            headers: {'content-type': 'application/json'},
+            body: jsonEncode({
+              'model': model,
+              'system': systemPrompt,
+              'prompt': userPrompt,
+              'stream': false,
+              // ── KEY: Force JSON mode ──
+              // This tells Ollama to constrain output to valid JSON.
+              'format': 'json',
+              'options': {
+                'temperature': 0.1,   // Low temp for structured output.
+                'top_p': 0.9,
+                'num_predict': 4096,  // Max tokens for response.
+                'num_ctx': 8192,      // Context window.
+              },
+            }),
+          ).timeout(const Duration(seconds: 120)); // Local models can be slow.
+
+          if (candidate.statusCode == 200) {
+            res = candidate;
+            break;
+          } else {
+            lastError = Exception(
+                'Ollama $model@$host: HTTP ${candidate.statusCode}');
+          }
+        } catch (e) {
+          lastError = e;
+          // Try next model/host combo.
         }
-      } catch (e) {
-        lastError = e;
       }
+      if (res != null) break;
     }
 
     if (res == null) {
-      if (lastError != null) {
-        throw lastError;
-      }
-      throw Exception('Ollama connection failed');
+      throw lastError ?? Exception('Ollama connection failed on all hosts/models');
     }
 
     final data = jsonDecode(res.body);
-    return data['response'] as String;
-  }
-
-  // ------------------------------------------------------------ LLM CALL
-  Future<String> _callLlm(String prompt, {int maxTokens = 600}) async {
-    final res = await http.post(
-      Uri.parse(_baseUrl),
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': storage.apiKey ?? '',
-        'anthropic-version': '2023-06-01',
-      },
-      body: jsonEncode({
-        'model': _model,
-        'max_tokens': maxTokens,
-        'messages': [
-          {'role': 'user', 'content': prompt}
-        ],
-      }),
-    );
-    if (res.statusCode != 200) {
-      throw Exception('LLM error ${res.statusCode}');
-    }
-    final data = jsonDecode(res.body);
-    return (data['content'][0]['text'] as String).trim();
+    return (data['response'] as String? ?? '').trim();
   }
 }
