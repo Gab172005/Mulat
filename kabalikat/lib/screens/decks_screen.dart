@@ -18,27 +18,8 @@ class DecksScreen extends StatefulWidget {
 }
 
 class _DecksScreenState extends State<DecksScreen> {
-  List<StudyDeck> _decks = [];
   bool _isLoading = false;
   bool _showUploadView = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadDecks();
-  }
-
-  void _loadDecks() {
-    final storage = context.read<AppState>().storage;
-    setState(() {
-      _decks = storage.loadDecks();
-      if (_decks.isEmpty) {
-        _showUploadView = true;
-      } else {
-        _showUploadView = false;
-      }
-    });
-  }
 
   /// Generates a [StudyDeck] via [HybridStudyContentRepository].
   ///
@@ -107,8 +88,8 @@ class _DecksScreenState extends State<DecksScreen> {
         text,
         'Generated Deck ${DateTime.now().toLocal().toString().split('.')[0]}',
       );
-      await appState.storage.saveDeck(deck);
-      _loadDecks();
+      await appState.addDeck(deck);
+      if (mounted) setState(() => _showUploadView = false);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -159,8 +140,8 @@ class _DecksScreenState extends State<DecksScreen> {
         text,
         'Photo Notes ${DateTime.now().toLocal().toString().split('.')[0]}',
       );
-      await appState.storage.saveDeck(deck);
-      _loadDecks();
+      await appState.addDeck(deck);
+      if (mounted) setState(() => _showUploadView = false);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -204,10 +185,10 @@ class _DecksScreenState extends State<DecksScreen> {
     );
   }
 
-  Widget _buildUploadView() {
+  Widget _buildUploadView(List decks) {
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: _decks.isNotEmpty
+      appBar: decks.isNotEmpty
           ? AppBar(
               leading: IconButton(
                 icon: const Icon(Icons.close),
@@ -220,7 +201,7 @@ class _DecksScreenState extends State<DecksScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            if (_decks.isEmpty) ...[
+            if (decks.isEmpty) ...[
               // Top blue line
               Container(
                 height: 4,
@@ -315,8 +296,10 @@ class _DecksScreenState extends State<DecksScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (_showUploadView || _decks.isEmpty && !_isLoading) {
-      return _buildUploadView();
+    final decks = context.watch<AppState>().decks;
+
+    if (_showUploadView || decks.isEmpty && !_isLoading) {
+      return _buildUploadView(decks);
     }
 
     return Scaffold(
@@ -336,18 +319,17 @@ class _DecksScreenState extends State<DecksScreen> {
               ),
             )
           : ListView.builder(
-              itemCount: _decks.length,
+              itemCount: decks.length,
               itemBuilder: (context, index) {
-                final deck = _decks[index];
+                final deck = decks[index];
                 return ListTile(
                   leading: const Icon(Icons.style),
                   title: Text(deck.title),
-                  subtitle: Text('${deck.flashcards.length} cards, ${deck.quizzes.length} quizzes'),
+                  subtitle: Text('${deck.flashcards.length} cards'),
                   trailing: IconButton(
                     icon: const Icon(Icons.delete, color: Colors.red),
                     onPressed: () async {
-                      await context.read<AppState>().storage.deleteDeck(deck.id);
-                      _loadDecks();
+                      await context.read<AppState>().removeDeck(deck.id);
                     },
                   ),
                   onTap: () {

@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../models/student_profile.dart';
+import '../models/study_deck.dart';
 import '../repositories/hybrid_study_content_repository.dart';
 import '../services/storage_service.dart';
 import '../services/connectivity_service.dart';
@@ -20,6 +21,8 @@ class AppState extends ChangeNotifier {
 
   StudentProfile profile = StudentProfile();
   Map<String, double> mastery = {}; // topic -> 0..1
+  List<StudyDeck> _decks = [];
+  List<StudyDeck> get decks => List.unmodifiable(_decks);
 
   AppState(this.storage) {
     ai = AiService(connectivity, storage);
@@ -29,8 +32,22 @@ class AppState extends ChangeNotifier {
   Future<void> load() async {
     profile = storage.loadProfile();
     mastery = storage.loadMastery();
+    _decks = storage.loadDecks();
     await connectivity.init();
     connectivity.onChange.listen((_) => notifyListeners());
+    notifyListeners();
+  }
+
+  // ---- Decks ----
+  Future<void> addDeck(StudyDeck deck) async {
+    await storage.saveDeck(deck);
+    _decks = storage.loadDecks();
+    notifyListeners();
+  }
+
+  Future<void> removeDeck(String id) async {
+    await storage.deleteDeck(id);
+    _decks = storage.loadDecks();
     notifyListeners();
   }
 

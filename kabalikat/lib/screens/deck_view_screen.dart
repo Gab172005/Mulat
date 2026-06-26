@@ -38,24 +38,16 @@ class _DeckViewScreenState extends State<DeckViewScreen> {
       appBar: AppBar(
         title: Text(widget.deck.title),
       ),
-      body: widget.deck.flashcards.isEmpty && widget.deck.quizzes.isEmpty
-          ? Center(child: Text('This deck is empty.'.tr(context)))
+      body: widget.deck.flashcards.isEmpty
+          ? Center(child: Text('This deck has no flashcards.'.tr(context)))
           : SingleChildScrollView(
               padding: const EdgeInsets.all(16.0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  if (widget.deck.flashcards.isNotEmpty) ...[
-                    Text('Flashcards'.tr(context), style: Theme.of(context).textTheme.titleLarge),
-                    const SizedBox(height: 8),
-                    _buildFlashcardView(),
-                    const SizedBox(height: 24),
-                  ],
-                  if (widget.deck.quizzes.isNotEmpty) ...[
-                    Text('Microquizzes'.tr(context), style: Theme.of(context).textTheme.titleLarge),
-                    const SizedBox(height: 8),
-                    ...widget.deck.quizzes.map((q) => _buildQuizCard(q)),
-                  ],
+                  Text('Flashcards'.tr(context), style: Theme.of(context).textTheme.titleLarge),
+                  const SizedBox(height: 8),
+                  _buildFlashcardView(),
                 ],
               ),
             ),
@@ -110,40 +102,4 @@ class _DeckViewScreenState extends State<DeckViewScreen> {
     );
   }
 
-  Widget _buildQuizCard(Microquiz quiz) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 16),
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(quiz.question, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-            const SizedBox(height: 12),
-            ...quiz.options.asMap().entries.map((entry) {
-              final idx = entry.key;
-              final text = entry.value;
-              return ListTile(
-                title: Text(text),
-                leading: CircleAvatar(
-                  backgroundColor: Theme.of(context).colorScheme.surface,
-                  child: Text('${idx + 1}', style: TextStyle(color: Theme.of(context).colorScheme.primary)),
-                ),
-                onTap: () {
-                  final isCorrect = idx == quiz.answerIndex;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(isCorrect ? 'Correct!' : 'Incorrect. Try again.'),
-                      backgroundColor: isCorrect ? Colors.green : Colors.red,
-                      duration: const Duration(seconds: 1),
-                    ),
-                  );
-                },
-              );
-            }),
-          ],
-        ),
-      ),
-    );
-  }
 }
