@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../services/l10n_service.dart';
 
-import '../state/app_state.dart';
 import '../models/chat_message.dart';
+import '../services/chat_controller.dart';
+import '../services/l10n_service.dart';
+import '../state/app_state.dart';
 import '../theme.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -16,104 +17,135 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> {
   final _input = TextEditingController();
   final _scroll = ScrollController();
-  final List<ChatMessage> _messages = [];
-  bool _thinking = false;
 
   @override
-  void initState() {
-    super.initState();
-    _messages.add(ChatMessage(
-      text:
-          'Kumusta! Ako si Kabalikat. Magtanong ka lang — Math, Science, English, kahit ano. '
-          'Try: "Explain photosynthesis" o "Paano mag-add ng fractions?"',
-      fromUser: false,
-    ));
+  void dispose() {
+    _input.dispose();
+    _scroll.dispose();
+    super.dispose();
   }
 
-  Future<void> _send() async {
-    final q = _input.text.trim();
-    if (q.isEmpty || _thinking) return;
-    final state = context.read<AppState>();
-    setState(() {
-      _messages.add(ChatMessage(text: q, fromUser: true));
-      _input.clear();
-      _thinking = true;
-    });
-    _jump();
-
-    final reply = await state.ai.tutor(q, state.profile);
-    setState(() {
-      _messages.add(ChatMessage(
-          text: reply.text, fromUser: false, offline: reply.offline));
-      _thinking = false;
-    });
-    _jump();
-  }
-
-  void _jump() {
+  void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scroll.hasClients) {
-        _scroll.animateTo(_scroll.position.maxScrollExtent,
-            duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
+        _scroll.animateTo(
+          _scroll.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOut,
+        );
       }
     });
   }
 
+  void _send(ChatController chat, AppState state) {
+    final text = _input.text.trim();
+    if (text.isEmpty || chat.isThinking) return;
+    _input.clear();
+    chat.sendMessage(text, state.profile);
+    _scrollToBottom();
+  }
+
   @override
   Widget build(BuildContext context) {
+    // Watch ChatController for reactive rebuilds on new messages / thinking state.
+    // AppState is read-only here — we only need the student profile.
+    final chat = context.watch<ChatController>();
+    final state = context.read<AppState>();
+
+    // Auto-scroll when the message list grows.
+    _scrollToBottom();
+
     return Column(
       children: [
         Expanded(
           child: ListView.builder(
             controller: _scroll,
             padding: const EdgeInsets.all(16),
-            itemCount: _messages.length + (_thinking ? 1 : 0),
+            itemCount: chat.messages.length + (chat.isThinking ? 1 : 0),
             itemBuilder: (context, i) {
-              if (_thinking && i == _messages.length) {
+              if (chat.isThinking && i == chat.messages.length) {
                 return _Bubble(
-                    fromUser: false, child: Text('...nag-iisip si Kabalikat'.tr(context)));
+                  fromUser: false,
+                  child: Text('...nag-iisip si Kabalikat'.tr(context)),
+                );
               }
-              final m = _messages[i];
+              final m = chat.messages[i];
               return _Bubble(
                 fromUser: m.fromUser,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(m.text),
-                    if (m.offline)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 6),
-                        child: Text('cached · offline'.tr(context),
-                            style: const TextStyle(
-                                fontSize: 10, color: Colors.white54)),
-                      ),
-                  ],
-                ),
+                child: _MessageContent(message: m),
               );
             },
           ),
         ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-          child: Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _input,
-                  onSubmitted: (_) => _send(),
-                  decoration: InputDecoration(
-                    hintText: 'Ask a question...'.tr(context),
-                    suffixIcon: IconButton(
-                      icon: const Icon(Icons.send, color: kPrimary),
-                      onPressed: _send,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
+        _InputBar(
+          controller: _input,
+          onSend: () => _send(chat, state),
+          disabled: chat.isThinking,
         ),
       ],
+    );
+  }
+}
+
+class _MessageContent extends StatelessWidget {
+  final ChatMessage message;
+  const _MessageContent({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(message.text),
+        if (message.offline)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+              'cached · offline'.tr(context),
+              style: const TextStyle(fontSize: 10, color: Colors.white54),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _InputBar extends StatelessWidget {
+  final TextEditingController controller;
+  final VoidCallback onSend;
+  final bool disabled;
+
+  const _InputBar({
+    required this.controller,
+    required this.onSend,
+    required this.disabled,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: controller,
+              enabled: !disabled,
+              onSubmitted: (_) => onSend(),
+              decoration: InputDecoration(
+                hintText: 'Ask a question...'.tr(context),
+                suffixIcon: IconButton(
+                  icon: Icon(
+                    Icons.send,
+                    color: disabled ? Colors.grey : kPrimary,
+                  ),
+                  onPressed: disabled ? null : onSend,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -141,7 +173,8 @@ class _Bubble extends StatelessWidget {
               margin: const EdgeInsets.symmetric(vertical: 6),
               padding: const EdgeInsets.all(16),
               constraints: BoxConstraints(
-                  maxWidth: MediaQuery.of(context).size.width * 0.75),
+                maxWidth: MediaQuery.of(context).size.width * 0.75,
+              ),
               decoration: BoxDecoration(
                 color: fromUser ? kSurface : Colors.transparent,
                 border: fromUser ? null : Border.all(color: kBorder),

@@ -16,8 +16,14 @@ Future<void> main() async {
   await appState.load();
 
   runApp(
-    ChangeNotifierProvider.value(
-      value: appState,
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider.value(value: appState),
+        // ChatController is owned by AppState but registered separately so
+        // ChatScreen can call context.watch<ChatController>() without
+        // rebuilding the entire widget tree on every typing keystroke.
+        ChangeNotifierProvider.value(value: appState.chat),
+      ],
       child: const KabalikatApp(),
     ),
   );

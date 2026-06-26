@@ -6,6 +6,7 @@ import '../repositories/hybrid_study_content_repository.dart';
 import '../services/storage_service.dart';
 import '../services/connectivity_service.dart';
 import '../services/ai_service.dart';
+import '../services/chat_controller.dart';
 
 /// Central app state. Holds the profile, per-topic mastery, connectivity,
 /// and the adaptive-difficulty logic used by the Practice screen.
@@ -13,6 +14,9 @@ class AppState extends ChangeNotifier {
   final StorageService storage;
   final ConnectivityManager connectivity = ConnectivityManager();
   late final AiService ai;
+
+  /// Persistent chat service. Lives here so it survives screen navigation.
+  late final ChatController chat;
 
   /// Hybrid repository: routes study-content generation to Gemini (online)
   /// or Ollama (offline / timeout cascade). Use this for all new deck
@@ -26,6 +30,7 @@ class AppState extends ChangeNotifier {
 
   AppState(this.storage) {
     ai = AiService(connectivity, storage);
+    chat = ChatController(connectivity, storage);
     repo = HybridStudyContentRepository(connectivity, storage);
   }
 
@@ -34,6 +39,7 @@ class AppState extends ChangeNotifier {
     mastery = storage.loadMastery();
     _decks = storage.loadDecks();
     await connectivity.init();
+    await chat.init();
     connectivity.onChange.listen((_) => notifyListeners());
     notifyListeners();
   }
