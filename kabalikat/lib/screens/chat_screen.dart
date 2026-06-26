@@ -37,6 +37,30 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
+  Future<void> _confirmClear(ChatController chat) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Clear conversation history?'.tr(ctx)),
+        content: Text('This will remove all messages and start fresh.'.tr(ctx)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Cancel'.tr(ctx)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(
+              'Clear'.tr(ctx),
+              style: const TextStyle(color: Colors.red),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) chat.clearHistory();
+  }
+
   void _send(ChatController chat, AppState state) {
     final text = _input.text.trim();
     if (text.isEmpty || chat.isThinking) return;
@@ -57,6 +81,29 @@ class _ChatScreenState extends State<ChatScreen> {
 
     return Column(
       children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 8, 0),
+          child: Row(
+            children: [
+              const Icon(Icons.auto_awesome, color: kPrimary, size: 18),
+              const SizedBox(width: 8),
+              Text(
+                'Kabalikat',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: kPrimary,
+                      fontWeight: FontWeight.w600,
+                    ),
+              ),
+              const Spacer(),
+              if (chat.messages.length > 1)
+                IconButton(
+                  icon: const Icon(Icons.delete_sweep_outlined),
+                  tooltip: 'Clear chat'.tr(context),
+                  onPressed: () => _confirmClear(chat),
+                ),
+            ],
+          ),
+        ),
         Expanded(
           child: ListView.builder(
             controller: _scroll,

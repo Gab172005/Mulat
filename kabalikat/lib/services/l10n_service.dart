@@ -96,6 +96,26 @@ const Map<String, Map<AppLanguage, String>> _translations = {
     AppLanguage.filipino: 'Magtanong...',
     AppLanguage.taglish: 'Magtanong / Ask...',
   },
+  'Clear chat': {
+    AppLanguage.english: 'Clear chat',
+    AppLanguage.filipino: 'Burahin ang chat',
+    AppLanguage.taglish: 'I-clear ang chat',
+  },
+  'Clear conversation history?': {
+    AppLanguage.english: 'Clear conversation history?',
+    AppLanguage.filipino: 'Burahin ang kasaysayan ng pag-uusap?',
+    AppLanguage.taglish: 'I-clear ang chat history?',
+  },
+  'This will remove all messages and start fresh.': {
+    AppLanguage.english: 'This will remove all messages and start fresh.',
+    AppLanguage.filipino: 'Mabubura ang lahat ng mensahe at magsisimula ulit.',
+    AppLanguage.taglish: 'Mabubura ang lahat ng messages at mag-start fresh.',
+  },
+  'Cancel': {
+    AppLanguage.english: 'Cancel',
+    AppLanguage.filipino: 'Kanselahin',
+    AppLanguage.taglish: 'Cancel',
+  },
 
   // Practice
   'Next question': {
@@ -208,8 +228,8 @@ const Map<String, Map<AppLanguage, String>> _translations = {
   },
   'Clear': {
     AppLanguage.english: 'Clear',
-    AppLanguage.filipino: 'I-clear',
-    AppLanguage.taglish: 'Clear',
+    AppLanguage.filipino: 'Burahin',
+    AppLanguage.taglish: 'I-clear',
   },
   'Wala pang practice. Pumunta sa Practice tab para magsimula.': {
     AppLanguage.english: 'No practice yet. Go to Practice tab to start.',
