@@ -45,6 +45,7 @@ ${language.crossLanguageInstruction}
 
 QUALITY RULES:
 - Extract information ONLY from the provided document text. NEVER invent facts.
+- NEVER use topics, concepts, or facts from the few-shot examples — those are format demonstrations only.
 - Each item must cover a DIFFERENT concept. No rephrasing the same idea.
 - Keep answers concise: 1-3 sentences per item.''';
 
@@ -385,16 +386,18 @@ FORMAT (follow EXACTLY):
   ]
 }
 
-GOOD EXAMPLE:
+GOOD EXAMPLE (FORMAT ONLY — the topic above is NOT your topic):
 ${_reviewerGoodExample(language)}
 
 BAD EXAMPLE (DO NOT generate like this):
 ${_reviewerBadExample(language)}
 
+⚠️ CRITICAL: The examples above only demonstrate the JSON format. Do NOT generate content about Cell Theory, cells, prokaryotes, or any topic from the examples. Every concept you write MUST come ONLY from the DOCUMENT TEXT below.
+
 ${language.midPromptReminder}
 
 ──────────────────────────────────
-DOCUMENT TEXT:
+DOCUMENT TEXT (your ONLY source — do NOT invent or use example topics):
 $text
 ──────────────────────────────────
 ${language.generateNowAnchor}''';
@@ -422,16 +425,18 @@ FORMAT (follow EXACTLY):
   ]
 }
 
-GOOD EXAMPLE:
+GOOD EXAMPLE (FORMAT ONLY — the topic above is NOT your topic):
 ${_flashcardGoodExample(language)}
 
 BAD EXAMPLE (DO NOT generate like this):
 ${_flashcardBadExample(language)}
 
+⚠️ CRITICAL: The examples above only demonstrate the JSON format. Do NOT generate flashcards about the First Philippine Republic, Aguinaldo, Bonifacio, or any topic from the examples. Every flashcard MUST be based ONLY on the DOCUMENT TEXT below.
+
 ${language.midPromptReminder}
 
 ──────────────────────────────────
-DOCUMENT TEXT:
+DOCUMENT TEXT (your ONLY source — do NOT invent or use example topics):
 $text
 ──────────────────────────────────
 ${language.generateNowAnchor}''';
@@ -460,16 +465,18 @@ FORMAT (follow EXACTLY):
   ]
 }
 
-GOOD EXAMPLE:
+GOOD EXAMPLE (FORMAT ONLY — the topic above is NOT your topic):
 ${_quizGoodExample(language)}
 
 BAD EXAMPLE (DO NOT generate like this):
 ${_quizBadExample(language)}
 
+⚠️ CRITICAL: The examples above only demonstrate the JSON format. Do NOT generate questions about producers, consumers, decomposers, photosynthesis, food chains, ecosystems, or any topic from the examples. Every question MUST be based ONLY on the DOCUMENT TEXT below.
+
 ${language.midPromptReminder}
 
 ──────────────────────────────────
-DOCUMENT TEXT:
+DOCUMENT TEXT (your ONLY source — do NOT invent or use example topics):
 $text
 ──────────────────────────────────
 ${language.generateNowAnchor}''';
