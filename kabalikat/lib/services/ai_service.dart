@@ -91,8 +91,9 @@ class AiService {
   /// UI — wraps all errors and returns empty content on total failure.
   Future<StudyContent> generateStudyContent(
     String extractedText,
-    String mode,
-  ) async {
+    String mode, {
+    required AppLanguage language,
+  }) async {
     // Map string mode to enum.
     final contentMode = switch (mode) {
       'reviewer' => ContentMode.reviewer,
@@ -109,7 +110,7 @@ class AiService {
     if (_canUseGemini) {
       try {
         final raw = await _callGemini(
-          _buildGeminiPrompt(text, contentMode),
+          _buildGeminiPrompt(text, contentMode, language),
           maxTokens: 4096,
         );
         final content = _parseResponse(raw, contentMode, offline: false);
@@ -125,6 +126,7 @@ class AiService {
       final prompts = buildOllamaPrompt(
         extractedText: text,
         mode: contentMode,
+        language: language,
       );
       final raw = await _callOllama(prompts.system, prompts.user);
       return _parseResponse(raw, contentMode, offline: true);
@@ -140,14 +142,18 @@ class AiService {
   // ══════════════════════════════════════════════════════════════════
   /// Generates a full StudyDeck (flashcards + quizzes) for the Decks
   /// screen. Uses generateStudyContent() internally.
-  Future<StudyDeck> generateStudyDeck(String documentText, String title) async {
+  Future<StudyDeck> generateStudyDeck(
+    String documentText,
+    String title, {
+    required AppLanguage language,
+  }) async {
     // Smart truncate: preserve sentence boundaries.
     final text = _smartTruncate(documentText);
 
     // Generate flashcards and quizzes in parallel for speed.
     final results = await Future.wait([
-      generateStudyContent(text, 'flashcards'),
-      generateStudyContent(text, 'quiz'),
+      generateStudyContent(text, 'flashcards', language: language),
+      generateStudyContent(text, 'quiz', language: language),
     ]);
 
     final flashcardContent = results[0];
@@ -292,9 +298,9 @@ class AiService {
   // ══════════════════════════════════════════════════════════════════
   //  GEMINI PROMPT BUILDER
   // ══════════════════════════════════════════════════════════════════
-  String _buildGeminiPrompt(String text, ContentMode mode) {
+  String _buildGeminiPrompt(String text, ContentMode mode, AppLanguage language) {
     // Gemini is smart enough to follow instructions without few-shot,
-    // but we still enforce JSON-only output and Taglish preference.
+    // but we enforce language directives for strict compliance.
     final modeInstruction = switch (mode) {
       ContentMode.reviewer =>
         'Generate a reviewer (key concepts summary). Return JSON with key "reviewers", '
@@ -310,12 +316,18 @@ class AiService {
 
     return '''You are an expert study content generator for Filipino students.
 $modeInstruction
-Write all content in Taglish (mix of Filipino and English).
+
+${language.contentLanguageDirective}
+
+${language.crossLanguageInstruction}
+
 Extract information ONLY from the provided document text.
 Return ONLY valid JSON. No markdown, no explanation.
 
 Document Text:
-$text''';
+$text
+
+${language.generateNowAnchor}''';
   }
 
   // ══════════════════════════════════════════════════════════════════

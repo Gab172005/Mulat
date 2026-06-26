@@ -60,7 +60,11 @@ class _DecksScreenState extends State<DecksScreen> {
     });
 
     try {
-      final deck = await aiService.generateStudyDeck(text, 'Generated Deck ${DateTime.now().toLocal().toString().split('.')[0]}');
+      final deck = await aiService.generateStudyDeck(
+        text,
+        'Generated Deck ${DateTime.now().toLocal().toString().split('.')[0]}',
+        language: appState.profile.language,
+      );
       await storage.saveDeck(deck);
       _loadDecks();
     } catch (e) {
@@ -112,6 +116,7 @@ class _DecksScreenState extends State<DecksScreen> {
       final deck = await appState.ai.generateStudyDeck(
         text,
         'Photo Notes ${DateTime.now().toLocal().toString().split('.')[0]}',
+        language: appState.profile.language,
       );
       await appState.storage.saveDeck(deck);
       _loadDecks();
