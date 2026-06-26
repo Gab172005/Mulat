@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../state/app_state.dart';
 import '../models/chat_message.dart';
+import '../models/student_profile.dart';
 import '../services/ai_service.dart';
 import '../theme.dart';
 
@@ -22,12 +23,13 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
-    _messages.add(ChatMessage(
-      text:
-          'Kumusta! Ako si Kabalikat. Magtanong ka lang — Math, Science, English, kahit ano. '
-          'Try: "Explain photosynthesis" o "Paano mag-add ng fractions?"',
-      fromUser: false,
-    ));
+    final lang = context.read<AppState>().profile.language;
+    final greeting = lang == AppLanguage.english
+        ? 'Hi! I\'m Kabalikat. Ask me anything — Math, Science, English. '
+            'Try: "Explain photosynthesis" or "How do I add fractions?"'
+        : 'Kumusta! Ako si Kabalikat. Magtanong ka lang — Math, Science, English, kahit ano. '
+            'Try: "Explain photosynthesis" o "Paano mag-add ng fractions?"';
+    _messages.add(ChatMessage(text: greeting, fromUser: false));
   }
 
   Future<void> _send() async {

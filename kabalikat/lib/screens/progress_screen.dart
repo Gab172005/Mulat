@@ -3,6 +3,7 @@ import 'package:kabalikat/models/student_profile.dart';
 import 'package:provider/provider.dart';
 
 import '../state/app_state.dart';
+import '../strings.dart';
 import '../theme.dart';
 
 class ProgressScreen extends StatelessWidget {
@@ -11,6 +12,7 @@ class ProgressScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
+    final s = S(state.isFilipino);
     final entries = state.mastery.entries.toList();
 
     return SingleChildScrollView(
@@ -18,10 +20,10 @@ class ProgressScreen extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Hi, ${state.profile.name} 👋',
+          Text(s.hi(state.profile.name),
               style:
                   const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-          Text('Grade ${state.profile.grade} · ${state.profile.language.label}',
+          Text(s.gradeLang(state.profile.grade, state.profile.language.label),
               style: const TextStyle(color: Colors.white60)),
           const SizedBox(height: 20),
           Card(
@@ -30,7 +32,7 @@ class ProgressScreen extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Overall mastery'),
+                  Text(s.overallMastery),
                   const SizedBox(height: 10),
                   LinearProgressIndicator(
                     value: state.overallMastery,
@@ -47,13 +49,11 @@ class ProgressScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 20),
-          const Text('By topic',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+          Text(s.byTopic,
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
           const SizedBox(height: 10),
           if (entries.isEmpty)
-            const Text(
-                'Wala pang practice. Pumunta sa Practice tab para magsimula.',
-                style: TextStyle(color: Colors.white54))
+            Text(s.noPractice, style: const TextStyle(color: Colors.white54))
           else
             for (final e in entries)
               Padding(

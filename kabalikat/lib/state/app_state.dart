@@ -60,6 +60,11 @@ class AppState extends ChangeNotifier {
 
   bool get isOnline => connectivity.isOnline;
 
+  /// True when UI text should render in Filipino (Filipino or Taglish picked).
+  bool get isFilipino =>
+      profile.language == AppLanguage.filipino ||
+      profile.language == AppLanguage.taglish;
+
   void toggleDemoOffline(bool offline) {
     connectivity.forceOffline(offline);
     notifyListeners();

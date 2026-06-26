@@ -124,6 +124,7 @@ const List<PracticeQuestion> kOfflineQuestions = [
     prompt: 'What is H₂O commonly known as?',
     promptFil: 'Ano ang karaniwang tawag sa H₂O?',
     choices: ['Salt', 'Water', 'Air', 'Sugar'],
+    choicesFil: ['Asin', 'Tubig', 'Hangin', 'Asukal'],
     answerIndex: 1,
     explanation: 'H₂O is the chemical formula for water.',
     explanationFil: 'Ang H₂O ay ang pormula ng tubig.',
@@ -134,6 +135,7 @@ const List<PracticeQuestion> kOfflineQuestions = [
     prompt: 'A jeepney stops suddenly and you lurch forward. This is due to?',
     promptFil: 'Biglang huminto ang jeep at napasubsob ka. Dahil ito sa?',
     choices: ['Gravity', 'Inertia', 'Friction', 'Magnetism'],
+    choicesFil: ['Grabidad', 'Inertia', 'Friksyon', 'Magnetismo'],
     answerIndex: 1,
     explanation: "Inertia (Newton's First Law) keeps you moving forward.",
     explanationFil:
@@ -145,6 +147,7 @@ const List<PracticeQuestion> kOfflineQuestions = [
     prompt: 'Which part of a plant absorbs water from the soil?',
     promptFil: 'Aling bahagi ng halaman ang sumisipsip ng tubig mula sa lupa?',
     choices: ['Leaves', 'Roots', 'Flower', 'Stem'],
+    choicesFil: ['Dahon', 'Ugat', 'Bulaklak', 'Tangkay'],
     answerIndex: 1,
     explanation: 'Roots absorb water and nutrients from the soil.',
     explanationFil: 'Ang ugat ang sumisipsip ng tubig at sustansya sa lupa.',
@@ -157,6 +160,7 @@ const List<PracticeQuestion> kOfflineQuestions = [
     promptFil:
         'Sa siklo ng tubig, anong proseso ang nagpapabalik ng singaw sa likidong ulap?',
     choices: ['Evaporation', 'Condensation', 'Precipitation', 'Collection'],
+    choicesFil: ['Pagsingaw', 'Pagbuo ng ulap', 'Pag-ulan', 'Pag-ipon'],
     answerIndex: 1,
     explanation: 'Condensation cools vapor into cloud droplets.',
     explanationFil:

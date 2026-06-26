@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../state/app_state.dart';
-import '../models/student_profile.dart';
 import '../models/practice_question.dart';
+import '../strings.dart';
 import '../theme.dart';
 
 class PracticeScreen extends StatefulWidget {
@@ -60,11 +60,11 @@ class _PracticeScreenState extends State<PracticeScreen> {
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
-    final fil = state.profile.language == AppLanguage.filipino ||
-        state.profile.language == AppLanguage.taglish;
+    final fil = state.isFilipino;
+    final s = S(fil);
 
     if (_q == null && !_loading) {
-      return _Intro(onStart: _load);
+      return _Intro(onStart: _load, s: s);
     }
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
@@ -79,22 +79,22 @@ class _PracticeScreenState extends State<PracticeScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Chip(label: Text('${q.topic} · Level ${q.difficulty}')),
-              Text('Score: $_correct/$_answered'),
+              Chip(label: Text('${q.topic} · ${s.level} ${q.difficulty}')),
+              Text('${s.score}: $_correct/$_answered'),
             ],
           ),
           const SizedBox(height: 6),
           Text(
-            'Focus: $_focusTopic — your lowest-mastery topic right now.',
+            s.focus(_focusTopic),
             style: const TextStyle(fontSize: 12, color: Colors.white54),
           ),
           const SizedBox(height: 16),
           Text(fil ? q.promptFil : q.prompt,
               style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
           const SizedBox(height: 20),
-          for (var i = 0; i < q.choices.length; i++)
+          for (var i = 0; i < q.choicesFor(fil).length; i++)
             _ChoiceTile(
-              text: q.choices[i],
+              text: q.choicesFor(fil)[i],
               state: _tileState(i, q.answerIndex),
               onTap: () => _choose(i),
             ),
@@ -107,7 +107,7 @@ class _PracticeScreenState extends State<PracticeScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      _selected == q.answerIndex ? 'Tama! ✅' : 'Mali — okay lang!',
+                      _selected == q.answerIndex ? s.correct() : s.wrong(),
                       style: TextStyle(
                           fontWeight: FontWeight.bold,
                           color: _selected == q.answerIndex
@@ -125,13 +125,13 @@ class _PracticeScreenState extends State<PracticeScreen> {
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: _load,
-                child: const Text('Next question'),
+                child: Text(s.nextQuestion),
               ),
             ),
             const SizedBox(height: 8),
             Text(
-              'Difficulty adapts to your $_focusTopic mastery '
-              '(${(state.masteryFor(_focusTopic) * 100).round()}%).',
+              s.difficultyNote(
+                  _focusTopic, (state.masteryFor(_focusTopic) * 100).round()),
               style: const TextStyle(fontSize: 12, color: Colors.white54),
             ),
           ],
@@ -184,7 +184,8 @@ class _ChoiceTile extends StatelessWidget {
 
 class _Intro extends StatelessWidget {
   final VoidCallback onStart;
-  const _Intro({required this.onStart});
+  final S s;
+  const _Intro({required this.onStart, required this.s});
 
   @override
   Widget build(BuildContext context) {
@@ -196,17 +197,17 @@ class _Intro extends StatelessWidget {
           children: [
             const Icon(Icons.quiz_outlined, size: 64, color: kAccent),
             const SizedBox(height: 16),
-            const Text('Adaptive Practice',
-                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+            Text(s.adaptivePractice,
+                style:
+                    const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
-            const Text(
-              'Questions get easier or harder based on how you answer. '
-              'Works offline with cached items.',
+            Text(
+              s.practiceIntro,
               textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white70),
+              style: const TextStyle(color: Colors.white70),
             ),
             const SizedBox(height: 24),
-            ElevatedButton(onPressed: onStart, child: const Text('Start practice')),
+            ElevatedButton(onPressed: onStart, child: Text(s.startPractice)),
           ],
         ),
       ),

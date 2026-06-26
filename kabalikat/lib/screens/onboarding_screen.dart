@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../state/app_state.dart';
 import '../models/student_profile.dart';
+import '../strings.dart';
 import '../theme.dart';
 
 class OnboardingScreen extends StatefulWidget {
@@ -19,6 +20,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Onboarding text follows the language chip the user is currently on,
+    // so it switches live as they tap Filipino / English / Taglish.
+    final s = S(_lang == AppLanguage.filipino || _lang == AppLanguage.taglish);
     return Scaffold(
       body: SafeArea(
         child: Padding(
@@ -32,28 +36,27 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                       fontWeight: FontWeight.bold,
                       color: kAccent)),
               const SizedBox(height: 6),
-              const Text('Your AI study buddy — kahit walang signal.',
-                  style: TextStyle(color: Colors.white70)),
+              Text(s.tagline, style: const TextStyle(color: Colors.white70)),
               const SizedBox(height: 32),
-              const Text('Ano ang pangalan mo? / Your name'),
+              Text(s.yourName),
               const SizedBox(height: 8),
               TextField(
                 controller: _name,
                 decoration: const InputDecoration(hintText: 'Juan'),
               ),
               const SizedBox(height: 24),
-              const Text('Grade level'),
+              Text(s.gradeLevel),
               const SizedBox(height: 8),
               DropdownButtonFormField<int>(
                 value: _grade,
                 items: [
                   for (var g = 1; g <= 12; g++)
-                    DropdownMenuItem(value: g, child: Text('Grade $g'))
+                    DropdownMenuItem(value: g, child: Text(s.grade(g)))
                 ],
                 onChanged: (v) => setState(() => _grade = v ?? 7),
               ),
               const SizedBox(height: 24),
-              const Text('Wikang gagamitin / Language'),
+              Text(s.language),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
@@ -70,12 +73,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               ElevatedButton(
                 onPressed: () {
                   context.read<AppState>().completeOnboarding(
-                        _name.text.trim().isEmpty ? 'Estudyante' : _name.text.trim(),
+                        _name.text.trim().isEmpty
+                            ? s.defaultName
+                            : _name.text.trim(),
                         _grade,
                         _lang,
                       );
                 },
-                child: const Text('Simulan / Start'),
+                child: Text(s.start),
               ),
             ],
           ),

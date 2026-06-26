@@ -163,7 +163,8 @@ class AiService {
       'Create ONE $diffLabel multiple-choice question for a Grade ${p.grade} '
       'Filipino student${topic == 'General' ? '' : ' about $topic'}. '
       'Return ONLY valid JSON with keys: topic, difficulty ($difficulty), '
-      'prompt, promptFil, choices (array of 4), answerIndex (0-3), '
+      'prompt, promptFil, choices (array of 4), choicesFil (the same 4 '
+      'choices in Filipino, same order), answerIndex (0-3), '
       'explanation, explanationFil. promptFil/explanationFil are Filipino.',
     );
     final jsonStr = raw.substring(raw.indexOf('{'), raw.lastIndexOf('}') + 1);

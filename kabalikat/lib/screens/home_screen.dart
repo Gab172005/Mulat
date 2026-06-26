@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
+import '../state/app_state.dart';
+import '../strings.dart';
 import '../widgets/connection_banner.dart';
 import 'chat_screen.dart';
 import 'practice_screen.dart';
@@ -25,6 +28,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final s = S(context.watch<AppState>().isFilipino);
     return Scaffold(
       body: Column(
         children: [
@@ -35,11 +39,15 @@ class _HomeScreenState extends State<HomeScreen> {
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (i) => setState(() => _index = i),
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.chat_bubble_outline), label: 'Tutor'),
-          NavigationDestination(icon: Icon(Icons.quiz_outlined), label: 'Practice'),
-          NavigationDestination(icon: Icon(Icons.insights_outlined), label: 'Progress'),
-          NavigationDestination(icon: Icon(Icons.settings_outlined), label: 'Settings'),
+        destinations: [
+          NavigationDestination(
+              icon: const Icon(Icons.chat_bubble_outline), label: s.tabTutor),
+          NavigationDestination(
+              icon: const Icon(Icons.quiz_outlined), label: s.tabPractice),
+          NavigationDestination(
+              icon: const Icon(Icons.insights_outlined), label: s.tabProgress),
+          NavigationDestination(
+              icon: const Icon(Icons.settings_outlined), label: s.tabSettings),
         ],
       ),
     );
