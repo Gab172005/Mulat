@@ -65,24 +65,52 @@ class SecureJsonParser {
   }
 
   // ════════════════════════════════════════════════════════════════════
+  //  LAYER 0: Strip Silent CoT reasoning fields
+  // ════════════════════════════════════════════════════════════════════
+  /// Recursively removes internal planning fields (_reasoning, _think,
+  /// _plan) that the Silent CoT prompt technique injects for the model's
+  /// scratch space. These fields are never shown to the user.
+  static void _stripReasoning(Map<String, dynamic> map) {
+    map.remove('_reasoning');
+    map.remove('_think');
+    map.remove('_plan');
+    for (final value in map.values) {
+      if (value is Map<String, dynamic>) _stripReasoning(value);
+      if (value is List) {
+        for (final item in value) {
+          if (item is Map<String, dynamic>) _stripReasoning(item);
+        }
+      }
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════════════
   //  LAYER 1 & 2: Direct parse + markdown stripping
   // ════════════════════════════════════════════════════════════════════
   static Map<String, dynamic>? _safeParse(String raw) {
     // Layer 1: Try direct parse.
     try {
       final decoded = jsonDecode(raw.trim());
-      if (decoded is Map<String, dynamic>) return decoded;
+      if (decoded is Map<String, dynamic>) {
+        _stripReasoning(decoded);
+        return decoded;
+      }
     } catch (_) {}
 
     // Layer 2: Strip markdown fences.
     var cleaned = _stripMarkdown(raw);
     try {
       final decoded = jsonDecode(cleaned);
-      if (decoded is Map<String, dynamic>) return decoded;
+      if (decoded is Map<String, dynamic>) {
+        _stripReasoning(decoded);
+        return decoded;
+      }
     } catch (_) {}
 
     // Layer 3: Try repairing truncated JSON.
-    return _repairAndParse(cleaned);
+    final repaired = _repairAndParse(cleaned);
+    if (repaired != null) _stripReasoning(repaired);
+    return repaired;
   }
 
   /// Remove ```json ... ``` fences and leading/trailing whitespace.

@@ -63,13 +63,18 @@ class AiService {
       'https://generativelanguage.googleapis.com/v1beta/models/$_geminiModel:generateContent?key=${storage.apiKey ?? ''}';
 
   // ── Ollama Configuration ───────────────────────────────────────────
-  // Preferred models for hackathon: Llama 3.2 3B (best quality) or
-  // Gemma 2 2B (smaller, faster). Falls back through multiple model names.
+  // Model priority:
+  //   1. kabalikat — custom Modelfile with baked params + system prompt
+  //   2. Explicit quantization tags for quality/speed sweet spots
+  //   3. Smaller fallbacks for low-memory devices
   static const _ollamaModels = [
-    'llama3.2:3b',   // Best quality for the size
-    'gemma2:2b',     // Google's compact model
-    'llama3.2:1b',   // Ultra-light fallback
-    'qwen2.5:0.5b',  // Tiny but sometimes available
+    'kabalikat',                       // Custom Modelfile (preferred)
+    'llama3.2:3b-instruct-q4_K_M',    // Explicit quant for quality
+    'llama3.2:3b',                     // Default quant fallback
+    'gemma2:2b-instruct-q5_K_M',      // Gemma needs q5 for Taglish
+    'gemma2:2b',                       // Default Gemma fallback
+    'llama3.2:1b-instruct-q8_0',      // 1B needs q8 to compensate
+    'qwen2.5:0.5b',                    // Emergency fallback
   ];
 
   bool get _canUseGemini =>
@@ -96,10 +101,9 @@ class AiService {
       _ => ContentMode.flashcards, // Default to flashcards.
     };
 
-    // Truncate text for small model context windows.
-    const maxLen = 6000;
-    final text =
-        extractedText.length > maxLen ? extractedText.substring(0, maxLen) : extractedText;
+    // Smart truncate: preserve sentence boundaries instead of cutting
+    // mid-sentence, which confuses small models.
+    final text = _smartTruncate(extractedText);
 
     // ── ROUTE 1: Try Gemini (online) ─────────────────────────────
     if (_canUseGemini) {
@@ -137,11 +141,8 @@ class AiService {
   /// Generates a full StudyDeck (flashcards + quizzes) for the Decks
   /// screen. Uses generateStudyContent() internally.
   Future<StudyDeck> generateStudyDeck(String documentText, String title) async {
-    // Truncate document text if too long for local model context
-    const maxLength = 6000;
-    final text = documentText.length > maxLength
-        ? documentText.substring(0, maxLength)
-        : documentText;
+    // Smart truncate: preserve sentence boundaries.
+    final text = _smartTruncate(documentText);
 
     // Generate flashcards and quizzes in parallel for speed.
     final results = await Future.wait([
@@ -349,16 +350,20 @@ $text''';
   }
 
   // ══════════════════════════════════════════════════════════════════
-  //  OLLAMA API CALL — with JSON Mode + Multi-Model Fallback
+  //  OLLAMA API CALL — Optimized with Dynamic Context + Multi-Fallback
   // ══════════════════════════════════════════════════════════════════
   /// Calls the local Ollama API with:
   ///   • {"format": "json"} to force JSON output.
-  ///   • System prompt for strict instruction following.
+  ///   • Dynamic context window sizing to minimize KV-cache memory.
+  ///   • Optimized sampling params (temp 0.15, top_p 0.85, top_k 35).
   ///   • Multi-host fallback for Android emulator (10.0.2.2) vs device.
   ///   • Multi-model fallback in case preferred model isn't pulled.
   Future<String> _callOllama(String systemPrompt, String userPrompt) async {
     final hosts =
         Platform.isAndroid ? ['10.0.2.2', '127.0.0.1'] : ['localhost'];
+
+    // Dynamic context window: size to actual input, not a fixed 8192.
+    final numCtx = _calculateNumCtx(systemPrompt, userPrompt);
 
     http.Response? res;
     dynamic lastError;
@@ -367,6 +372,10 @@ $text''';
     for (final host in hosts) {
       for (final model in _ollamaModels) {
         try {
+          // The kabalikat custom model has params baked in via Modelfile.
+          // Other models need explicit configuration.
+          final isCustomModel = model == 'kabalikat';
+
           final candidate = await http.post(
             Uri.parse('http://$host:11434/api/generate'),
             headers: {'content-type': 'application/json'},
@@ -375,20 +384,27 @@ $text''';
               'system': systemPrompt,
               'prompt': userPrompt,
               'stream': false,
-              // ── KEY: Force JSON mode ──
-              // This tells Ollama to constrain output to valid JSON.
+              // ── Force JSON mode ──
               'format': 'json',
               'options': {
-                'temperature': 0.1,   // Low temp for structured output.
-                'top_p': 0.9,
-                'num_predict': 4096,  // Max tokens for response.
-                'num_ctx': 8192,      // Context window.
+                // Custom model has sampling params baked in;
+                // only inject for fallback models.
+                if (!isCustomModel) ...{
+                  'temperature': 0.15,    // Enough entropy for Taglish variety
+                  'top_p': 0.85,          // Tighter nucleus for bilingual
+                  'top_k': 35,            // Eliminates JSON-breaking tokens
+                  'repeat_penalty': 1.15, // Prevents duplicate items
+                  'repeat_last_n': 256,   // Covers ~3-4 complete JSON objects
+                },
+                'num_predict': 3072,    // Hard ceiling prevents rambling
+                'num_ctx': numCtx,      // Dynamic: saves RAM + speeds inference
               },
             }),
-          ).timeout(const Duration(seconds: 120)); // Local models can be slow.
+          ).timeout(const Duration(seconds: 90));
 
           if (candidate.statusCode == 200) {
             res = candidate;
+            print('[AiService] Ollama success: $model@$host (ctx=$numCtx)');
             break;
           } else {
             lastError = Exception(
@@ -408,5 +424,71 @@ $text''';
 
     final data = jsonDecode(res.body);
     return (data['response'] as String? ?? '').trim();
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  //  CONTEXT WINDOW & TEXT MANAGEMENT
+  // ══════════════════════════════════════════════════════════════════
+
+  /// Calculate optimal context window size for the given input.
+  /// Rounds up to nearest power of 2 for memory alignment efficiency.
+  /// Prevents over-allocating KV-cache on memory-constrained devices.
+  int _calculateNumCtx(String systemPrompt, String userPrompt) {
+    // Rough tokenization: ~1 token per 3.5 characters for mixed
+    // Taglish/English (Filipino tokens are less efficiently tokenized
+    // by Llama's BPE vocabulary than English).
+    final inputTokens =
+        ((systemPrompt.length + userPrompt.length) / 3.5).ceil();
+
+    // Output budget: ~120 tokens per flashcard/quiz item × 12 items
+    // + 20% safety margin = ~1730 tokens.
+    const outputBudget = 1800;
+
+    final needed = inputTokens + outputBudget;
+
+    // Round up to nearest power of 2 for memory alignment.
+    if (needed <= 2048) return 2048;
+    if (needed <= 4096) return 4096;
+    if (needed <= 8192) return 8192;
+    return 8192; // Hard cap — don't go higher on consumer hardware.
+  }
+
+  /// Truncate text to fit context window while preserving sentence
+  /// boundaries. Prioritizes the beginning (key definitions) and
+  /// end (summaries/conclusions) of the document.
+  static String _smartTruncate(String text, {int maxChars = 5500}) {
+    if (text.length <= maxChars) return text;
+
+    // Split into sentences (rough heuristic).
+    final sentences = text.split(RegExp(r'(?<=[.!?])\s+'));
+    if (sentences.isEmpty) {
+      return text.substring(0, maxChars);
+    }
+
+    // Take from the beginning until we hit 70% of budget.
+    final headBudget = (maxChars * 0.7).toInt();
+    final tailBudget = maxChars - headBudget;
+
+    final headBuffer = StringBuffer();
+    for (final s in sentences) {
+      if (headBuffer.length + s.length + 1 > headBudget) break;
+      headBuffer.write('$s ');
+    }
+
+    // Take from the end for the remaining budget.
+    final tailBuffer = StringBuffer();
+    final reversedSentences = sentences.reversed.toList();
+    for (final s in reversedSentences) {
+      if (tailBuffer.length + s.length + 1 > tailBudget) break;
+      tailBuffer.write('$s ');
+    }
+
+    final head = headBuffer.toString().trim();
+    final tail = tailBuffer.toString().trim();
+
+    // Avoid duplication if head and tail overlap.
+    if (head.contains(tail)) return head;
+
+    return '$head\n\n[...]\n\n$tail';
   }
 }

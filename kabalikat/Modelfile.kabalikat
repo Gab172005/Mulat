@@ -1,0 +1,85 @@
+# ═══════════════════════════════════════════════════════════════════════
+# KABALIKAT MODELFILE — Optimized for Filipino Educational Content Gen
+# Base: llama3.2:3b (best quality/size ratio for bilingual structured output)
+#
+# BUILD:
+#   ollama pull llama3.2:3b
+#   ollama create kabalikat -f Modelfile.kabalikat
+#
+# VERIFY:
+#   ollama show kabalikat --modelfile
+#   ollama run kabalikat '{"flashcards":[{"front":"test","back":"test"}]}'
+# ═══════════════════════════════════════════════════════════════════════
+
+FROM llama3.2:3b
+
+# ── SAMPLING PARAMETERS ──────────────────────────────────────────────
+
+# Temperature: 0.15 — enough entropy to vary Taglish phrasing without
+# hallucinating JSON keys. 0.0 causes degenerate repetition in 3B models.
+PARAMETER temperature 0.15
+
+# Top-P (nucleus): 0.85 — tighter than default 0.9. At 3B scale, 0.9
+# spreads probability mass too thin, sampling low-confidence Filipino
+# tokens that produce garbled Taglish.
+PARAMETER top_p 0.85
+
+# Top-K: 35 — eliminates the long tail of unlikely JSON-breaking tokens
+# (random punctuation, code symbols). Combined with top_p=0.85, creates
+# a tight but not degenerate sampling envelope.
+PARAMETER top_k 35
+
+# Repeat Penalty: 1.15 — stops "Ano ang X?" from appearing 10 times,
+# but not so harsh that it forces unnatural synonym substitution in
+# Filipino (where vocabulary is narrower than English).
+PARAMETER repeat_penalty 1.15
+
+# Repeat Last N: 256 — default is 64. For a 10-item flashcard array
+# (~200-300 tokens/item), the model "forgets" earlier items at 64.
+# 256 covers ~3-4 complete objects, preventing structural repetition.
+PARAMETER repeat_last_n 256
+
+# Context Window: 4096 — sweet spot for our token budget.
+# Input (~2050 tokens) + Output (~1200 tokens) = ~3250 tokens.
+# 8192 doubles KV-cache memory for zero benefit.
+PARAMETER num_ctx 4096
+
+# Max Output Tokens: 3072 — hard ceiling prevents runaway generation.
+# Enough for 10-15 quiz/flashcard items.
+PARAMETER num_predict 3072
+
+# Stop Sequences: Force clean JSON termination. Small models often
+# append conversational text after closing the JSON object.
+PARAMETER stop "```"
+PARAMETER stop "\n\n\n"
+PARAMETER stop "Note:"
+PARAMETER stop "Here"
+PARAMETER stop "I hope"
+PARAMETER stop "Let me"
+
+# Mirostat: OFF — adaptive perplexity control actively fights the
+# deterministic JSON structure we need.
+PARAMETER mirostat 0
+
+# ── SYSTEM PROMPT ────────────────────────────────────────────────────
+
+SYSTEM """You are Kabalikat, an AI study content generator built for Filipino K-12 and college students.
+
+STRICT RULES (violating ANY of these makes your output USELESS):
+1. Respond with ONLY valid JSON. No markdown fences. No explanations before or after.
+2. Write all educational content in TAGLISH — naturally mixing Filipino and English the way Filipino students actually speak and study. Use Filipino for conversational framing ("Ano ang...", "Halimbawa ng...") and English for technical terms.
+3. Extract information ONLY from the provided document text. NEVER add facts not present in the source.
+4. Follow the exact JSON schema specified in each request. Do not add, rename, or remove keys.
+5. Generate the MINIMUM number of items requested. Never fewer.
+6. Each item must be SUBSTANTIVELY DIFFERENT — no rephrasing the same concept.
+7. Keep answers concise but complete. A flashcard back should be 1-3 sentences, not a paragraph.
+
+TAGLISH STYLE GUIDE:
+- GOOD: "Ang photosynthesis ay ang process kung saan ginagamit ng plants ang sunlight para gumawa ng food."
+- BAD (pure English): "Photosynthesis is the process by which plants use sunlight to produce food."
+- BAD (pure Filipino): "Ang potosintesis ay ang proseso kung saan ginagamit ng mga halaman ang sikat ng araw upang makagawa ng pagkain."
+- BAD (forced/awkward): "Ang potosintesis ay isang proseso ng pagkain-gawa gamit ang araw."
+"""
+
+# ── LICENSE ──────────────────────────────────────────────────────────
+LICENSE """Kabalikat Educational AI - Hackathon Project. Base model license: Meta Llama 3.2 Community License."""
